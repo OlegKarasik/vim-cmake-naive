@@ -1,6 +1,7 @@
 let s:default_input_filename = 'compile_commands.json'
 let s:default_output_filename = 'compile_commands.json'
 let s:cmake_config_relative_path = '.vim/.cmake/.config.json'
+let s:cmake_presets_filename = 'CMakePresets.json'
 let s:cmake_config_preset_key = 'preset'
 let s:cmake_config_build_config_key = 'build'
 let s:cmake_config_output_key = 'output'
@@ -9,7 +10,7 @@ let s:cmake_config_default_output = 'build'
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
 
-function! cdbm#split(...) abort
+function! vim_cmake_naive#split(...) abort
   try
     let l:options = s:parse_split_args(a:000)
     call s:run_split(l:options)
@@ -18,7 +19,7 @@ function! cdbm#split(...) abort
   endtry
 endfunction
 
-function! cdbm#switch(...) abort
+function! vim_cmake_naive#switch(...) abort
   try
     let l:options = s:parse_switch_args(a:000)
     call s:run_switch(l:options)
@@ -27,7 +28,7 @@ function! cdbm#switch(...) abort
   endtry
 endfunction
 
-function! cdbm#cmake_config() abort
+function! vim_cmake_naive#cmake_config() abort
   try
     call s:run_cmake_config()
   catch
@@ -35,7 +36,15 @@ function! cdbm#cmake_config() abort
   endtry
 endfunction
 
-function! cdbm#set_config_preset(preset) abort
+function! vim_cmake_naive#switch_preset() abort
+  try
+    call s:run_switch_preset()
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#set_config_preset(preset) abort
   try
     call s:run_set_config_preset(a:preset)
   catch
@@ -43,7 +52,7 @@ function! cdbm#set_config_preset(preset) abort
   endtry
 endfunction
 
-function! cdbm#reset_config_preset() abort
+function! vim_cmake_naive#reset_config_preset() abort
   try
     call s:run_reset_config_preset()
   catch
@@ -51,7 +60,7 @@ function! cdbm#reset_config_preset() abort
   endtry
 endfunction
 
-function! cdbm#set_config_build_config(build_config) abort
+function! vim_cmake_naive#set_config_build_config(build_config) abort
   try
     call s:run_set_config_build_config(a:build_config)
   catch
@@ -59,7 +68,7 @@ function! cdbm#set_config_build_config(build_config) abort
   endtry
 endfunction
 
-function! cdbm#set_config_output(output) abort
+function! vim_cmake_naive#set_config_output(output) abort
   try
     call s:run_set_config_output(a:output)
   catch
@@ -67,7 +76,7 @@ function! cdbm#set_config_output(output) abort
   endtry
 endfunction
 
-function! cdbm#cmake_config_default() abort
+function! vim_cmake_naive#cmake_config_default() abort
   try
     call s:run_cmake_config_default()
   catch
@@ -75,7 +84,7 @@ function! cdbm#cmake_config_default() abort
   endtry
 endfunction
 
-function! cdbm#generate() abort
+function! vim_cmake_naive#generate() abort
   try
     call s:run_generate()
   catch
@@ -159,7 +168,7 @@ endfunction
 function! s:parse_switch_args(argv) abort
   let l:args = copy(a:argv)
   if len(l:args) < 2
-    throw 'Usage: :CdbmSwitch <build-directory> <target> [--output <path>]'
+    throw 'Usage: vim_cmake_naive#switch(<build-directory>, <target>, [--output <path>])'
   endif
 
   let l:options = {
@@ -350,6 +359,355 @@ function! s:run_set_config_output(output) abort
   call s:set_config_value(s:cmake_config_output_key, l:output, 1)
 endfunction
 
+function! s:run_switch_preset() abort
+  let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:presets_path = s:cmake_presets_path(l:project_root)
+  if !filereadable(l:presets_path)
+    throw s:cmake_presets_filename . ' not found at project root: ' . l:presets_path
+  endif
+
+  let l:presets_payload = s:read_json_object(l:presets_path)
+  let l:available_presets = s:available_configure_presets(l:presets_payload, l:project_root)
+  if empty(l:available_presets)
+    throw 'No selectable configure presets found in ' . s:cmake_presets_filename . '.'
+  endif
+
+  let l:selected_preset = s:select_item_from_list('Select CMake preset:', l:available_presets)
+  if empty(l:selected_preset)
+    call s:write_info('Preset selection canceled.')
+    return
+  endif
+
+  execute 'CMakeConfigSetPreset ' . fnameescape(l:selected_preset)
+endfunction
+
+function! s:available_configure_presets(presets_payload, project_root) abort
+  let l:configure_presets = get(a:presets_payload, 'configurePresets', [])
+  if type(l:configure_presets) != v:t_list
+    throw s:cmake_presets_filename . ' key "configurePresets" must be a JSON array.'
+  endif
+
+  let l:preset_map = {}
+  for l:preset in l:configure_presets
+    if type(l:preset) != v:t_dict
+      continue
+    endif
+
+    let l:name = trim(s:to_string_or_empty(get(l:preset, 'name', '')))
+    if empty(l:name)
+      continue
+    endif
+
+    let l:preset_map[l:name] = l:preset
+  endfor
+
+  let l:context = s:cmake_condition_context(a:project_root)
+  let l:available = []
+  let l:seen = {}
+  for l:preset in l:configure_presets
+    if type(l:preset) != v:t_dict
+      continue
+    endif
+
+    let l:name = trim(s:to_string_or_empty(get(l:preset, 'name', '')))
+    if empty(l:name) || has_key(l:seen, l:name)
+      continue
+    endif
+
+    if s:preset_is_hidden(l:preset)
+      continue
+    endif
+
+    if !s:configure_preset_condition_passes(l:name, l:preset_map, l:context, {})
+      continue
+    endif
+
+    let l:seen[l:name] = 1
+    call add(l:available, l:name)
+  endfor
+
+  return l:available
+endfunction
+
+function! s:configure_preset_condition_passes(preset_name, preset_map, context, stack) abort
+  if !has_key(a:preset_map, a:preset_name)
+    throw 'Configure preset "' . a:preset_name . '" not found.'
+  endif
+
+  if has_key(a:stack, a:preset_name)
+    throw 'CMake preset inheritance cycle detected at "' . a:preset_name . '".'
+  endif
+
+  let l:preset = a:preset_map[a:preset_name]
+  let l:stack = copy(a:stack)
+  let l:stack[a:preset_name] = 1
+
+  for l:parent_name in s:preset_inherits_list(l:preset)
+    if !has_key(a:preset_map, l:parent_name)
+      throw 'Configure preset "' . a:preset_name . '" inherits missing preset "' . l:parent_name . '".'
+    endif
+
+    if !s:configure_preset_condition_passes(l:parent_name, a:preset_map, a:context, l:stack)
+      return 0
+    endif
+  endfor
+
+  if !has_key(l:preset, 'condition')
+    return 1
+  endif
+
+  return s:evaluate_preset_condition(l:preset.condition, a:context, a:preset_name)
+endfunction
+
+function! s:preset_inherits_list(preset) abort
+  let l:inherits = get(a:preset, 'inherits', [])
+  if type(l:inherits) == v:t_string
+    let l:name = trim(l:inherits)
+    return empty(l:name) ? [] : [l:name]
+  endif
+
+  if type(l:inherits) != v:t_list
+    return []
+  endif
+
+  let l:parent_names = []
+  for l:item in l:inherits
+    let l:name = trim(s:to_string_or_empty(l:item))
+    if !empty(l:name)
+      call add(l:parent_names, l:name)
+    endif
+  endfor
+
+  return l:parent_names
+endfunction
+
+function! s:preset_is_hidden(preset) abort
+  if !has_key(a:preset, 'hidden')
+    return 0
+  endif
+
+  return s:as_condition_bool(a:preset.hidden)
+endfunction
+
+function! s:cmake_condition_context(project_root) abort
+  let l:source_dir = s:normalize_full_path(a:project_root)
+  let l:source_parent_dir = s:trim_path(fnamemodify(l:source_dir, ':h'))
+  return {
+        \ 'sourceDir': l:source_dir,
+        \ 'sourceParentDir': l:source_parent_dir,
+        \ 'sourceDirName': fnamemodify(l:source_dir, ':t'),
+        \ 'hostSystemName': s:host_system_name()
+        \ }
+endfunction
+
+function! s:host_system_name() abort
+  if s:is_windows
+    return 'Windows'
+  endif
+
+  if has('mac') || has('macunix')
+    return 'Darwin'
+  endif
+
+  return has('unix') ? 'Linux' : ''
+endfunction
+
+function! s:evaluate_preset_condition(condition, context, preset_name) abort
+  if a:condition is v:null
+    return 1
+  endif
+
+  if type(a:condition) == v:t_number
+    return a:condition != 0
+  endif
+
+  if exists('v:t_bool') && type(a:condition) == v:t_bool
+    return a:condition == v:true
+  endif
+
+  if type(a:condition) == v:t_string
+    return s:as_condition_bool(s:expand_condition_string(a:condition, a:context, a:preset_name))
+  endif
+
+  if type(a:condition) != v:t_dict
+    throw 'Unsupported preset condition value type.'
+  endif
+
+  let l:condition_type = tolower(trim(s:to_string_or_empty(get(a:condition, 'type', ''))))
+  if empty(l:condition_type)
+    throw 'Preset condition object is missing required key "type".'
+  endif
+
+  if l:condition_type ==# 'const'
+    return s:as_condition_bool(get(a:condition, 'value', 0))
+  endif
+
+  if l:condition_type ==# 'equals'
+    return s:condition_string_value(get(a:condition, 'lhs', ''), a:context, a:preset_name)
+          \ ==# s:condition_string_value(get(a:condition, 'rhs', ''), a:context, a:preset_name)
+  endif
+
+  if l:condition_type ==# 'notequals'
+    return s:condition_string_value(get(a:condition, 'lhs', ''), a:context, a:preset_name)
+          \ !=# s:condition_string_value(get(a:condition, 'rhs', ''), a:context, a:preset_name)
+  endif
+
+  if l:condition_type ==# 'inlist' || l:condition_type ==# 'notinlist'
+    let l:needle = s:condition_string_value(get(a:condition, 'string', ''), a:context, a:preset_name)
+    let l:list_values = s:condition_list_values(get(a:condition, 'list', []), a:context, a:preset_name)
+    let l:contains = index(l:list_values, l:needle) >= 0
+    return l:condition_type ==# 'inlist' ? l:contains : !l:contains
+  endif
+
+  if l:condition_type ==# 'matches' || l:condition_type ==# 'notmatches'
+    let l:value = s:condition_string_value(get(a:condition, 'string', ''), a:context, a:preset_name)
+    let l:regex = s:condition_string_value(get(a:condition, 'regex', ''), a:context, a:preset_name)
+    let l:matches = 0
+    try
+      let l:matches = l:value =~# l:regex
+    catch
+      throw 'Invalid regex in preset condition: ' . l:regex
+    endtry
+    return l:condition_type ==# 'matches' ? l:matches : !l:matches
+  endif
+
+  if l:condition_type ==# 'anyof' || l:condition_type ==# 'allof'
+    let l:conditions = get(a:condition, 'conditions', [])
+    if type(l:conditions) != v:t_list
+      throw 'Preset condition "' . l:condition_type . '" requires list key "conditions".'
+    endif
+
+    let l:is_any = l:condition_type ==# 'anyof'
+    if empty(l:conditions)
+      return l:is_any ? 0 : 1
+    endif
+
+    for l:item in l:conditions
+      let l:passed = s:evaluate_preset_condition(l:item, a:context, a:preset_name)
+      if l:is_any && l:passed
+        return 1
+      endif
+      if !l:is_any && !l:passed
+        return 0
+      endif
+    endfor
+
+    return l:is_any ? 0 : 1
+  endif
+
+  if l:condition_type ==# 'not'
+    if !has_key(a:condition, 'condition')
+      throw 'Preset condition "not" requires key "condition".'
+    endif
+    return !s:evaluate_preset_condition(a:condition.condition, a:context, a:preset_name)
+  endif
+
+  throw 'Unsupported preset condition type "' . l:condition_type . '".'
+endfunction
+
+function! s:condition_string_value(value, context, preset_name) abort
+  return s:expand_condition_string(s:to_string_or_empty(a:value), a:context, a:preset_name)
+endfunction
+
+function! s:condition_list_values(values, context, preset_name) abort
+  if type(a:values) != v:t_list
+    return []
+  endif
+
+  let l:result = []
+  for l:item in a:values
+    call add(l:result, s:condition_string_value(l:item, a:context, a:preset_name))
+  endfor
+  return l:result
+endfunction
+
+function! s:expand_condition_string(value, context, preset_name) abort
+  let l:expanded = s:to_string_or_empty(a:value)
+  if empty(l:expanded)
+    return ''
+  endif
+
+  let l:expanded = substitute(
+        \ l:expanded,
+        \ '\${\([^}]\+\)}',
+        \ '\=s:expand_braced_macro(submatch(1), a:context, a:preset_name)',
+        \ 'g')
+  let l:expanded = substitute(
+        \ l:expanded,
+        \ '\$env{\([^}]\+\)}',
+        \ '\=s:expand_env_macro(submatch(1))',
+        \ 'g')
+  let l:expanded = substitute(
+        \ l:expanded,
+        \ '\$penv{\([^}]\+\)}',
+        \ '\=s:expand_env_macro(submatch(1))',
+        \ 'g')
+
+  return l:expanded
+endfunction
+
+function! s:expand_braced_macro(name, context, preset_name) abort
+  let l:name = trim(s:to_string_or_empty(a:name))
+  if l:name ==# 'presetName'
+    return a:preset_name
+  endif
+
+  return s:to_string_or_empty(get(a:context, l:name, ''))
+endfunction
+
+function! s:expand_env_macro(name) abort
+  let l:name = trim(s:to_string_or_empty(a:name))
+  return empty(l:name) ? '' : s:to_string_or_empty(get(environ(), l:name, ''))
+endfunction
+
+function! s:as_condition_bool(value) abort
+  if type(a:value) == v:t_number
+    return a:value != 0
+  endif
+
+  if exists('v:t_bool') && type(a:value) == v:t_bool
+    return a:value == v:true
+  endif
+
+  if type(a:value) == v:t_string
+    let l:normalized = tolower(trim(a:value))
+    return !(empty(l:normalized) || l:normalized ==# '0' || l:normalized ==# 'false' || l:normalized ==# 'off' || l:normalized ==# 'no')
+  endif
+
+  return 0
+endfunction
+
+function! s:select_item_from_list(prompt, items) abort
+  if empty(a:items)
+    return ''
+  endif
+
+  let l:selected_index = s:inputlist_selection(a:prompt, a:items)
+  let l:index = type(l:selected_index) == v:t_number
+        \ ? l:selected_index
+        \ : str2nr(s:to_string_or_empty(l:selected_index))
+  if l:index <= 0 || l:index > len(a:items)
+    return ''
+  endif
+
+  return a:items[l:index - 1]
+endfunction
+
+function! s:inputlist_selection(prompt, items) abort
+  if exists('g:vim_cmake_naive_test_inputlist_response')
+    return g:vim_cmake_naive_test_inputlist_response
+  endif
+
+  let l:lines = [a:prompt]
+  let l:index = 0
+  while l:index < len(a:items)
+    call add(l:lines, (l:index + 1) . '. ' . a:items[l:index])
+    let l:index += 1
+  endwhile
+
+  return inputlist(l:lines)
+endfunction
+
 function! s:run_cmake_config_default() abort
   let l:project_root = s:resolve_cmake_project_root(getcwd())
   let l:config_path = s:cmake_config_path(l:project_root)
@@ -512,6 +870,10 @@ endfunction
 
 function! s:cmake_config_path(project_root) abort
   return s:path_join(a:project_root, s:cmake_config_relative_path)
+endfunction
+
+function! s:cmake_presets_path(project_root) abort
+  return s:path_join(a:project_root, s:cmake_presets_filename)
 endfunction
 
 function! s:resolve_switch_target_directory(target_name, build_directory) abort
@@ -923,12 +1285,12 @@ function! s:to_string_or_empty(value) abort
 endfunction
 
 function! s:write_info(message) abort
-  echom '[cdbm] ' . a:message
+  echom '[vim-cmake-naive] ' . a:message
 endfunction
 
 function! s:write_error(message) abort
   echohl ErrorMsg
-  echom '[cdbm] ' . a:message
+  echom '[vim-cmake-naive] ' . a:message
   echohl None
 endfunction
 

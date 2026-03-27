@@ -4,10 +4,10 @@ set nomore
 let s:repo_root = fnamemodify(expand('<sfile>:p'), ':h:h')
 execute 'set runtimepath^=' . fnameescape(s:repo_root)
 
-runtime plugin/cdbm.vim
-execute 'source ' . fnameescape(s:repo_root . '/tests/cdbm_tests.vim')
+runtime plugin/vim_cmake_naive.vim
+execute 'source ' . fnameescape(s:repo_root . '/tests/vim_cmake_naive_tests.vim')
 
-call CdbmTestRunAll()
+call VimCMakeNaiveTestRunAll()
 
 if !empty(v:errors)
   for s:error in v:errors

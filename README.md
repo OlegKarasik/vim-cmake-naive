@@ -1,23 +1,22 @@
-# cdbm.vim
+# vim-cmake-naive
 
-`cdbm` is now a Vim plugin for working with CMake `compile_commands.json` files.
+`vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides nine commands:
+It provides eight commands:
 
-- `:CdbmSplit <build-directory> [--input <path>] [--output-name <name>] [--dry-run]`
-- `:CdbmSwitch <build-directory> <target> [--output <path>]`
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
+- `:CMakeSwitchPreset`
 - `:CMakeGenerate`
 - `:CMakeConfigSetPreset <preset>`
-- `:CMakeResetConfigPreset`
+- `:CMakeConfigResetPreset`
 - `:CMakeConfigSetBuild <value>`
 - `:CMakeConfigSetOutput <value>`
 
 ## Install (vim-plug)
 
 ```vim
-Plug 'YOUR_GITHUB_USER/cdbm'
+Plug 'YOUR_GITHUB_USER/vim-cmake-naive'
 ```
 
 Then run:
@@ -27,20 +26,6 @@ Then run:
 ```
 
 ## Usage
-
-Split one `compile_commands.json` into per-target files:
-
-```vim
-:CdbmSplit build --dry-run
-:CdbmSplit build
-```
-
-Switch active `compile_commands.json` to one target:
-
-```vim
-:CdbmSwitch build app
-:CdbmSwitch build app --output .
-```
 
 Create local CMake config file for this project:
 
@@ -82,6 +67,20 @@ This command:
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
 
+Switch local CMake preset from `CMakePresets.json`:
+
+```vim
+:CMakeSwitchPreset
+```
+
+This command:
+- finds nearest `CMakeLists.txt` from current directory upward
+- reads `CMakePresets.json` at that project root
+- lists selectable configure presets (non-hidden, condition evaluates to true)
+- prompts for selection and applies it via `:CMakeConfigSetPreset`
+
+If `CMakePresets.json` is missing, the command reports an error.
+
 Set the local CMake preset in `.vim/.cmake/.config.json`:
 
 ```vim
@@ -96,7 +95,7 @@ an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
 Reset the local CMake preset to empty:
 
 ```vim
-:CMakeResetConfigPreset
+:CMakeConfigResetPreset
 ```
 
 This creates the config file if needed and sets the `preset` key to `""`.
@@ -125,6 +124,4 @@ an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
 
 ## Notes
 
-- Target directories are inferred from `output`, `arguments`, and `command` fields.
-- `:CdbmSwitch` expects a target name (for example `app`), not a path.
-- Errors are reported through Vim messages with a `[cdbm]` prefix.
+- Errors are reported through Vim messages with a `[vim-cmake-naive]` prefix.

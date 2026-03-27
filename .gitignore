@@ -10,3 +10,4 @@
 
 # Test artifacts
 tests/vimlog*
+tests/tmp-build/

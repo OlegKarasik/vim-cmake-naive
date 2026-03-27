@@ -54,8 +54,15 @@ endfunction
 function! s:create_cmake_project_fixture() abort
   let l:root = tempname()
   call mkdir(l:root, 'p')
-  call writefile(['cmake_minimum_required(VERSION 3.20)', 'project(cdbm_test)'], s:path_join(l:root, 'CMakeLists.txt'), 'b')
+  call writefile(['cmake_minimum_required(VERSION 3.20)', 'project(vim_cmake_naive_test)'], s:path_join(l:root, 'CMakeLists.txt'), 'b')
   return { 'root': l:root }
+endfunction
+
+function! s:write_cmake_presets(path, configure_presets) abort
+  call s:write_json(a:path, {
+        \ 'version': 6,
+        \ 'configurePresets': a:configure_presets
+        \ })
 endfunction
 
 function! s:normalized_path(path) abort
@@ -91,7 +98,7 @@ function! s:test_split_writes_target_files() abort
     let l:input_path = s:path_join(l:fixture.build, 'compile_commands.json')
     call s:write_json(l:input_path, s:fixture_entries())
 
-    execute 'silent CdbmSplit ' . fnameescape(l:fixture.build)
+    call vim_cmake_naive#split(l:fixture.build)
 
     let l:app_output = s:path_join(
           \ s:path_join(s:path_join(l:fixture.build, 'CMakeFiles'), 'app.dir'),
@@ -138,7 +145,7 @@ function! s:test_split_handles_symlinked_build_directory() abort
     endif
 
     call s:write_json(s:path_join(l:link_build, 'compile_commands.json'), s:fixture_entries())
-    execute 'silent CdbmSplit ' . fnameescape(l:link_build)
+    call vim_cmake_naive#split(l:link_build)
 
     let l:app_output = s:path_join(
           \ s:path_join(s:path_join(l:real_build, 'CMakeFiles'), 'app.dir'),
@@ -160,7 +167,7 @@ function! s:test_split_dry_run_does_not_write_files() abort
     let l:input_path = s:path_join(l:fixture.build, 'compile_commands.json')
     call s:write_json(l:input_path, s:fixture_entries())
 
-    execute 'silent CdbmSplit ' . fnameescape(l:fixture.build) . ' --dry-run'
+    call vim_cmake_naive#split(l:fixture.build, '--dry-run')
 
     let l:app_output = s:path_join(
           \ s:path_join(s:path_join(l:fixture.build, 'CMakeFiles'), 'app.dir'),
@@ -182,12 +189,12 @@ function! s:test_split_honors_input_and_output_name() abort
     let l:input_path = s:path_join(l:fixture.build, 'all_commands.json')
     call s:write_json(l:input_path, s:fixture_entries())
 
-    execute 'silent CdbmSplit '
-          \ . fnameescape(l:fixture.build)
-          \ . ' --input '
-          \ . fnameescape(l:input_path)
-          \ . ' --output-name '
-          \ . 'target_commands.json'
+    call vim_cmake_naive#split(
+          \ l:fixture.build,
+          \ '--input',
+          \ l:input_path,
+          \ '--output-name',
+          \ 'target_commands.json')
 
     let l:app_output = s:path_join(
           \ s:path_join(s:path_join(l:fixture.build, 'CMakeFiles'), 'app.dir'),
@@ -213,12 +220,10 @@ function! s:test_split_honors_equals_style_input_and_output_name() abort
     let l:input_path = s:path_join(l:fixture.build, 'all_commands.json')
     call s:write_json(l:input_path, s:fixture_entries())
 
-    execute 'silent CdbmSplit '
-          \ . fnameescape(l:fixture.build)
-          \ . ' --input='
-          \ . fnameescape(l:input_path)
-          \ . ' --output-name='
-          \ . 'target_commands_equals.json'
+    call vim_cmake_naive#split(
+          \ l:fixture.build,
+          \ '--input=' . l:input_path,
+          \ '--output-name=target_commands_equals.json')
 
     let l:app_output = s:path_join(
           \ s:path_join(s:path_join(l:fixture.build, 'CMakeFiles'), 'app.dir'),
@@ -241,7 +246,7 @@ function! s:test_switch_copies_to_build_root_by_default() abort
     let l:source_path = s:path_join(l:target_dir, 'compile_commands.json')
     call s:write_json(l:source_path, [{'file': '../src/main.cpp', 'command': 'clang++ -c ../src/main.cpp'}])
 
-    execute 'silent CdbmSwitch ' . fnameescape(l:fixture.build) . ' app'
+    call vim_cmake_naive#switch(l:fixture.build, 'app')
 
     let l:destination_path = s:path_join(l:fixture.build, 'compile_commands.json')
     call assert_true(filereadable(l:destination_path))
@@ -259,10 +264,11 @@ function! s:test_switch_honors_output_directory() abort
     call s:write_json(l:source_path, [{'file': '../src/main.cpp', 'arguments': ['clang++', '-c', '../src/main.cpp']}])
 
     let l:output_dir = s:path_join(l:fixture.root, 'selected')
-    execute 'silent CdbmSwitch '
-          \ . fnameescape(l:fixture.build)
-          \ . ' app --output '
-          \ . fnameescape(l:output_dir)
+    call vim_cmake_naive#switch(
+          \ l:fixture.build,
+          \ 'app',
+          \ '--output',
+          \ l:output_dir)
 
     let l:destination_path = s:path_join(l:output_dir, 'compile_commands.json')
     call assert_true(filereadable(l:destination_path))
@@ -280,10 +286,10 @@ function! s:test_switch_honors_equals_style_output_directory() abort
     call s:write_json(l:source_path, [{'file': '../src/main.cpp', 'arguments': ['clang++', '-c', '../src/main.cpp']}])
 
     let l:output_dir = s:path_join(l:fixture.root, 'selected-equals')
-    execute 'silent CdbmSwitch '
-          \ . fnameescape(l:fixture.build)
-          \ . ' app --output='
-          \ . fnameescape(l:output_dir)
+    call vim_cmake_naive#switch(
+          \ l:fixture.build,
+          \ 'app',
+          \ '--output=' . l:output_dir)
 
     let l:destination_path = s:path_join(l:output_dir, 'compile_commands.json')
     call assert_true(filereadable(l:destination_path))
@@ -299,10 +305,10 @@ function! s:test_split_reports_missing_input_file() abort
     let l:missing_basename = s:unique_id('missing_input_') . '.json'
     let l:missing_input = s:path_join(l:fixture.build, l:missing_basename)
 
-    call cdbm#split(l:fixture.build, '--input', l:missing_input)
+    call vim_cmake_naive#split(l:fixture.build, '--input', l:missing_input)
 
     let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, '[cdbm] Input file not found:') >= 0)
+    call assert_true(stridx(l:messages, '[vim-cmake-naive] Input file not found:') >= 0)
     call assert_true(stridx(l:messages, l:missing_basename) >= 0)
   finally
     call delete(l:fixture.root, 'rf')
@@ -313,7 +319,7 @@ function! s:test_switch_reports_missing_target_directory() abort
   let l:fixture = s:create_build_fixture()
   try
     let l:missing_target = s:unique_id('missing_target_')
-    call cdbm#switch(l:fixture.build, l:missing_target)
+    call vim_cmake_naive#switch(l:fixture.build, l:missing_target)
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'target directory not found for') >= 0)
@@ -386,7 +392,7 @@ function! s:test_cmake_set_config_preset_preserves_existing_keys() abort
     call s:write_json(l:config_path, {'keep': 1, 'nested': {'enabled': 1}, 'preset': 'old'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    call cdbm#set_config_preset('Release With DebInfo')
+    call vim_cmake_naive#set_config_preset('Release With DebInfo')
 
     call assert_equal(
           \ {'keep': 1, 'nested': {'enabled': 1}, 'preset': 'Release With DebInfo'},
@@ -404,7 +410,7 @@ function! s:test_cmake_reset_config_preset_creates_config_with_empty_preset() ab
 
   try
     execute 'cd ' . fnameescape(l:root)
-    execute 'silent CMakeResetConfigPreset'
+    execute 'silent CMakeConfigResetPreset'
 
     let l:config_path = s:path_join(l:root, '.vim/.cmake/.config.json')
     call assert_true(filereadable(l:config_path), 'Expected .vim/.cmake/.config.json to be created.')
@@ -425,7 +431,7 @@ function! s:test_cmake_reset_config_preset_preserves_other_keys() abort
     call s:write_json(l:config_path, {'keep': 1, 'nested': {'enabled': 1}, 'preset': 'debug'})
 
     execute 'cd ' . fnameescape(l:root)
-    call cdbm#reset_config_preset()
+    call vim_cmake_naive#reset_config_preset()
 
     call assert_equal(
           \ {'keep': 1, 'nested': {'enabled': 1}, 'preset': ''},
@@ -463,7 +469,7 @@ function! s:test_cmake_set_config_build_config_preserves_other_keys() abort
     call s:write_json(l:config_path, {'keep': 1, 'preset': 'debug', 'build': 'Release'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    call cdbm#set_config_build_config('RelWithDebInfo')
+    call vim_cmake_naive#set_config_build_config('RelWithDebInfo')
 
     call assert_equal(
           \ {'keep': 1, 'preset': 'debug', 'build': 'RelWithDebInfo'},
@@ -501,7 +507,7 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    call cdbm#set_config_output('out/build')
+    call vim_cmake_naive#set_config_output('out/build')
 
     call assert_equal(
           \ {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'out/build'},
@@ -550,9 +556,9 @@ function! s:test_cmake_set_commands_error_when_no_local_config_found() abort
     let l:deep_dir = s:path_join(s:path_join(l:fixture.root, 'x'), 'y')
     call mkdir(l:deep_dir, 'p')
     execute 'cd ' . fnameescape(l:deep_dir)
-    call cdbm#set_config_preset('debug')
-    call cdbm#set_config_build_config('Debug')
-    call cdbm#set_config_output('build')
+    call vim_cmake_naive#set_config_preset('debug')
+    call vim_cmake_naive#set_config_build_config('Debug')
+    call vim_cmake_naive#set_config_output('build')
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0)
@@ -591,7 +597,7 @@ function! s:test_cmake_config_default_reapplies_defaults_and_preserves_other_key
           \ {'output': 'custom-out', 'preset': 'release', 'build': 'RelWithDebInfo', 'keep': 1})
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    call cdbm#cmake_config_default()
+    call vim_cmake_naive#cmake_config_default()
 
     call assert_equal(
           \ {'output': 'build', 'preset': '', 'build': 'Debug', 'keep': 1},
@@ -631,7 +637,7 @@ function! s:test_cmake_config_errors_when_no_cmakelists_found() abort
 
   try
     execute 'cd ' . fnameescape(l:root)
-    call cdbm#cmake_config()
+    call vim_cmake_naive#cmake_config()
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0)
@@ -672,7 +678,7 @@ function! s:test_cmake_config_default_errors_when_no_cmakelists_found() abort
 
   try
     execute 'cd ' . fnameescape(l:root)
-    call cdbm#cmake_config_default()
+    call vim_cmake_naive#cmake_config_default()
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0)
@@ -765,7 +771,7 @@ function! s:test_cmake_generate_errors_when_no_cmakelists_found() abort
 
   try
     execute 'cd ' . fnameescape(l:root)
-    call cdbm#generate()
+    call vim_cmake_naive#generate()
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0)
@@ -775,7 +781,111 @@ function! s:test_cmake_generate_errors_when_no_cmakelists_found() abort
   endtry
 endfunction
 
-function! CdbmTestRunAll() abort
+function! s:test_cmake_switch_preset_sets_selected_visible_preset() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'preset': 'old', 'keep': 1})
+
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [
+          \   {'name': 'hidden_release', 'hidden': v:true},
+          \   {'name': 'blocked', 'condition': {'type': 'equals', 'lhs': 'a', 'rhs': 'b'}},
+          \   {'name': 'linux_only', 'condition': {'type': 'equals', 'lhs': '${hostSystemName}', 'rhs': 'Linux'}},
+          \   {'name': 'dev', 'condition': {'type': 'equals', 'lhs': '${hostSystemName}', 'rhs': 'Darwin'}},
+          \   {'name': 'default'}
+          \ ])
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 2
+    execute 'silent CMakeSwitchPreset'
+
+    call assert_equal(
+          \ {'preset': 'default', 'keep': 1},
+          \ s:read_json(l:config_path))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_preset_reports_missing_presets_file() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#switch_preset()
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'CMakePresets.json not found at project root:') >= 0)
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_preset_cancels_without_changing_config() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'preset': 'stay'})
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [{'name': 'dev'}, {'name': 'default'}])
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 0
+    execute 'silent CMakeSwitchPreset'
+
+    call assert_equal({'preset': 'stay'}, s:read_json(l:config_path))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_preset_reports_no_selectable_presets() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [
+          \   {'name': 'hidden_release', 'hidden': v:true},
+          \   {'name': 'blocked', 'condition': {'type': 'equals', 'lhs': 'x', 'rhs': 'y'}}
+          \ ])
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#switch_preset()
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'No selectable configure presets found in CMakePresets.json.') >= 0)
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! VimCMakeNaiveTestRunAll() abort
   call s:test_split_writes_target_files()
   call s:test_split_handles_symlinked_build_directory()
   call s:test_split_dry_run_does_not_write_files()
@@ -807,4 +917,8 @@ function! CdbmTestRunAll() abort
   call s:test_cmake_generate_creates_default_config_and_invokes_cmake()
   call s:test_cmake_generate_uses_existing_config_values()
   call s:test_cmake_generate_errors_when_no_cmakelists_found()
+  call s:test_cmake_switch_preset_sets_selected_visible_preset()
+  call s:test_cmake_switch_preset_reports_missing_presets_file()
+  call s:test_cmake_switch_preset_cancels_without_changing_config()
+  call s:test_cmake_switch_preset_reports_no_selectable_presets()
 endfunction
