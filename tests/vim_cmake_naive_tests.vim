@@ -917,6 +917,7 @@ function! s:test_cmake_switch_preset_sets_selected_visible_preset() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -933,6 +934,7 @@ function! s:test_cmake_switch_preset_sets_selected_visible_preset() abort
           \ ])
 
     execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_menu_response = 2
     let g:vim_cmake_naive_test_inputlist_response = 2
     execute 'silent CMakeSwitchPreset'
 
@@ -944,6 +946,11 @@ function! s:test_cmake_switch_preset_sets_selected_visible_preset() abort
       unlet! g:vim_cmake_naive_test_inputlist_response
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -970,6 +977,7 @@ function! s:test_cmake_switch_preset_cancels_without_changing_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -979,6 +987,7 @@ function! s:test_cmake_switch_preset_cancels_without_changing_config() abort
           \ [{'name': 'dev'}, {'name': 'default'}])
 
     execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_menu_response = 0
     let g:vim_cmake_naive_test_inputlist_response = 0
     execute 'silent CMakeSwitchPreset'
 
@@ -988,6 +997,11 @@ function! s:test_cmake_switch_preset_cancels_without_changing_config() abort
       unlet! g:vim_cmake_naive_test_inputlist_response
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')

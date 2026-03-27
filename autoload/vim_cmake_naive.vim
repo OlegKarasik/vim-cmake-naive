@@ -393,7 +393,7 @@ function! s:run_switch_preset() abort
     throw 'No selectable configure presets found in ' . s:cmake_presets_filename . '.'
   endif
 
-  let l:selected_preset = s:select_item_from_list('Select CMake preset:', l:available_presets)
+  let l:selected_preset = s:select_item_from_menu('Select CMake preset:', l:available_presets)
   if empty(l:selected_preset)
     call s:write_info('Preset selection canceled.')
     return
@@ -1015,6 +1015,39 @@ function! s:select_item_from_list(prompt, items) abort
   endif
 
   return a:items[l:index - 1]
+endfunction
+
+function! s:select_item_from_menu(prompt, items) abort
+  if empty(a:items)
+    return ''
+  endif
+
+  let l:selected_index = s:menu_selection(a:prompt, a:items)
+  let l:index = type(l:selected_index) == v:t_number
+        \ ? l:selected_index
+        \ : str2nr(s:to_string_or_empty(l:selected_index))
+  if l:index <= 0 || l:index > len(a:items)
+    return ''
+  endif
+
+  return a:items[l:index - 1]
+endfunction
+
+function! s:menu_selection(prompt, items) abort
+  if exists('g:vim_cmake_naive_test_menu_response')
+    return g:vim_cmake_naive_test_menu_response
+  endif
+
+  if exists('g:vim_cmake_naive_test_inputlist_response')
+    return g:vim_cmake_naive_test_inputlist_response
+  endif
+
+  if exists('*confirm')
+    let l:choices = map(copy(a:items), 'substitute(v:val, "&", "&&", "g")')
+    return confirm(a:prompt, join(l:choices, "\n"), 0)
+  endif
+
+  return s:inputlist_selection(a:prompt, a:items)
 endfunction
 
 function! s:inputlist_selection(prompt, items) abort

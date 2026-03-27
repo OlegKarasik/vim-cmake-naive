@@ -1,5 +1,8 @@
 # vim-cmake-naive
 
+> [!WARNING]
+> This plugin was written by AI, except for `AGENTS.md`.
+
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
 It provides eleven commands:
@@ -94,7 +97,7 @@ This command:
 - finds nearest `CMakeLists.txt` from current directory upward
 - reads `CMakePresets.json` at that project root
 - lists selectable configure presets (non-hidden, condition evaluates to true)
-- prompts for selection and applies it via `:CMakeConfigSetPreset`
+- prompts through a menu for selection and applies it via `:CMakeConfigSetPreset`
 
 If `CMakePresets.json` is missing, the command reports an error.
 
