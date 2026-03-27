@@ -934,8 +934,8 @@ function! s:test_cmake_switch_preset_sets_selected_visible_preset() abort
           \ ])
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    let g:vim_cmake_naive_test_menu_response = 2
-    let g:vim_cmake_naive_test_inputlist_response = 2
+    let g:vim_cmake_naive_test_menu_response = 1
+    let g:vim_cmake_naive_test_inputlist_response = 1
     execute 'silent CMakeSwitchPreset'
 
     call assert_equal(

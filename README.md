@@ -96,8 +96,8 @@ Switch local CMake preset from `CMakePresets.json`:
 This command:
 - finds nearest `CMakeLists.txt` from current directory upward
 - reads `CMakePresets.json` at that project root
-- lists selectable configure presets (non-hidden, condition evaluates to true)
-- prompts through a menu for selection and applies it via `:CMakeConfigSetPreset`
+- lists selectable configure presets (non-hidden, condition evaluates to true) in sorted order
+- prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetPreset`
 
 If `CMakePresets.json` is missing, the command reports an error.
 

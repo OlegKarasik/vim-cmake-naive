@@ -389,8 +389,14 @@ function! s:run_switch_preset() abort
 
   let l:presets_payload = s:read_json_object(l:presets_path)
   let l:available_presets = s:available_configure_presets(l:presets_payload, l:project_root)
+  call sort(l:available_presets)
   if empty(l:available_presets)
     throw 'No selectable configure presets found in ' . s:cmake_presets_filename . '.'
+  endif
+
+  if s:should_use_popup_menu_for_preset_selection()
+    call s:show_switch_preset_popup('Select CMake preset:', l:available_presets)
+    return
   endif
 
   let l:selected_preset = s:select_item_from_menu('Select CMake preset:', l:available_presets)
@@ -399,7 +405,37 @@ function! s:run_switch_preset() abort
     return
   endif
 
-  execute 'CMakeConfigSetPreset ' . fnameescape(l:selected_preset)
+  call s:run_set_config_preset(l:selected_preset)
+endfunction
+
+function! s:should_use_popup_menu_for_preset_selection() abort
+  return exists('*popup_menu')
+        \ && !exists('g:vim_cmake_naive_test_menu_response')
+        \ && !exists('g:vim_cmake_naive_test_inputlist_response')
+endfunction
+
+function! s:show_switch_preset_popup(prompt, items) abort
+  call popup_menu(copy(a:items), {
+        \ 'title': a:prompt,
+        \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
+        \ })
+endfunction
+
+function! s:on_switch_preset_popup_selection(items, _popup_id, result) abort
+  let l:index = type(a:result) == v:t_number
+        \ ? a:result
+        \ : str2nr(s:to_string_or_empty(a:result))
+  if l:index <= 0 || l:index > len(a:items)
+    call s:write_info('Preset selection canceled.')
+    return
+  endif
+
+  let l:selected_preset = a:items[l:index - 1]
+  try
+    call s:run_set_config_preset(l:selected_preset)
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
 endfunction
 
 function! s:run_switch_target() abort
