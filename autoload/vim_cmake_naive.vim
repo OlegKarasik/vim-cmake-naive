@@ -5,6 +5,7 @@ let s:cmake_presets_filename = 'CMakePresets.json'
 let s:cmake_config_preset_key = 'preset'
 let s:cmake_config_build_config_key = 'build'
 let s:cmake_config_output_key = 'output'
+let s:cmake_config_target_key = 'target'
 let s:cmake_config_default_build = 'Debug'
 let s:cmake_config_default_output = 'build'
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
@@ -39,6 +40,14 @@ endfunction
 function! vim_cmake_naive#switch_preset() abort
   try
     call s:run_switch_preset()
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#switch_target() abort
+  try
+    call s:run_switch_target()
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -379,6 +388,107 @@ function! s:run_switch_preset() abort
   endif
 
   execute 'CMakeConfigSetPreset ' . fnameescape(l:selected_preset)
+endfunction
+
+function! s:run_switch_target() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
+  let l:config = s:read_json_object(l:config_path)
+  let l:project_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+  let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
+  let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  if empty(trim(l:output_value))
+    let l:output_value = s:cmake_config_default_output
+  endif
+
+  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  if !isdirectory(l:build_directory)
+    throw 'Build directory not found: ' . l:build_directory
+  endif
+
+  let l:scan_directory = s:target_scan_directory(l:build_directory, l:preset_value)
+  let l:targets = s:available_targets(l:build_directory, l:preset_value)
+  if empty(l:targets)
+    throw 'No selectable targets found in directory: ' . l:scan_directory
+  endif
+
+  let l:selected_target = s:select_item_from_list('Select CMake target:', l:targets)
+  if empty(l:selected_target)
+    call s:write_info('Target selection canceled.')
+    return
+  endif
+
+  call s:set_config_value(s:cmake_config_target_key, l:selected_target, 1)
+endfunction
+
+function! s:available_targets(build_directory, preset_value) abort
+  if empty(trim(a:build_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:scan_directory = s:target_scan_directory(a:build_directory, a:preset_value)
+  let l:glob_pattern = s:path_join(s:path_join(l:scan_directory, '**'), '*.dir')
+  let l:directory_matches = glob(l:glob_pattern, 0, 1)
+  let l:targets = []
+  let l:seen = {}
+
+  for l:match in l:directory_matches
+    if !isdirectory(l:match)
+      continue
+    endif
+
+    let l:normalized_match = s:normalize_full_path(l:match)
+    if !s:is_sub_path_of(l:normalized_match, l:scan_directory)
+      continue
+    endif
+
+    let l:relative_path = s:relative_path(l:normalized_match, l:scan_directory)
+    let l:relative_path = substitute(l:relative_path, '\\', '/', 'g')
+    if l:relative_path !~# '\v(^|/)CMakeFiles/[^/]+\.dir$'
+      continue
+    endif
+
+    let l:target_path = substitute(l:relative_path, '\.dir$', '', '')
+
+    if l:target_path =~# '^CMakeFiles/'
+      let l:target_path = strpart(l:target_path, strlen('CMakeFiles/'))
+    elseif l:target_path =~# '/CMakeFiles/'
+      let l:target_path = substitute(l:target_path, '^.\{-}/CMakeFiles/', '', '')
+    endif
+
+    if empty(trim(l:target_path))
+      continue
+    endif
+
+    let l:target_path = substitute(l:target_path, '/\+', '/', 'g')
+    if empty(trim(l:target_path))
+      continue
+    endif
+
+    if has_key(l:seen, l:target_path)
+      continue
+    endif
+
+    let l:seen[l:target_path] = 1
+    call add(l:targets, l:target_path)
+  endfor
+
+  call sort(l:targets)
+  return l:targets
+endfunction
+
+function! s:target_scan_directory(build_directory, preset_value) abort
+  if empty(trim(a:build_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  if empty(l:preset_value)
+    return a:build_directory
+  endif
+
+  let l:preset_directory = s:resolve_path(l:preset_value, a:build_directory)
+  return isdirectory(l:preset_directory) ? l:preset_directory : a:build_directory
 endfunction
 
 function! s:available_configure_presets(presets_payload, project_root) abort

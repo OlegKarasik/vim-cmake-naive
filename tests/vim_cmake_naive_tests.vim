@@ -885,6 +885,136 @@ function! s:test_cmake_switch_preset_reports_no_selectable_presets() abort
   endtry
 endfunction
 
+function! s:test_cmake_switch_target_sets_selected_target() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
+
+    let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
+    let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
+    call mkdir(l:target_app, 'p')
+    call mkdir(l:target_lib, 'p')
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 2
+    execute 'silent CMakeSwitchTarget'
+
+    call assert_equal(
+          \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'keep': 1},
+          \ s:read_json(l:config_path))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_target_falls_back_when_preset_dir_missing() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'missing-preset'})
+
+    let l:target_default = s:path_join(l:fixture.root, 'build/CMakeFiles/default_app.dir')
+    call mkdir(l:target_default, 'p')
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 1
+    call vim_cmake_naive#switch_target()
+
+    call assert_equal(
+          \ {'output': 'build', 'preset': 'missing-preset', 'target': 'default_app'},
+          \ s:read_json(l:config_path))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_target_cancels_without_changing_config() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'stay'})
+
+    call mkdir(s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir'), 'p')
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 0
+    execute 'silent CMakeSwitchTarget'
+
+    call assert_equal({'output': 'build', 'preset': 'dev', 'target': 'stay'}, s:read_json(l:config_path))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_target_reports_missing_build_directory() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'missing-build', 'preset': 'dev'})
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#switch_target()
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'Build directory not found:') >= 0)
+    call assert_false(has_key(s:read_json(l:config_path), 'target'))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_target_reports_when_no_targets_found() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+    call mkdir(s:path_join(l:fixture.root, 'build/dev'), 'p')
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#switch_target()
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'No selectable targets found in directory:') >= 0)
+    call assert_false(has_key(s:read_json(l:config_path), 'target'))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! VimCMakeNaiveTestRunAll() abort
   call s:test_split_writes_target_files()
   call s:test_split_handles_symlinked_build_directory()
@@ -921,4 +1051,9 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_preset_reports_missing_presets_file()
   call s:test_cmake_switch_preset_cancels_without_changing_config()
   call s:test_cmake_switch_preset_reports_no_selectable_presets()
+  call s:test_cmake_switch_target_sets_selected_target()
+  call s:test_cmake_switch_target_falls_back_when_preset_dir_missing()
+  call s:test_cmake_switch_target_cancels_without_changing_config()
+  call s:test_cmake_switch_target_reports_missing_build_directory()
+  call s:test_cmake_switch_target_reports_when_no_targets_found()
 endfunction

@@ -2,11 +2,12 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides eight commands:
+It provides nine commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
 - `:CMakeSwitchPreset`
+- `:CMakeSwitchTarget`
 - `:CMakeGenerate`
 - `:CMakeConfigSetPreset <preset>`
 - `:CMakeConfigResetPreset`
@@ -80,6 +81,19 @@ This command:
 - prompts for selection and applies it via `:CMakeConfigSetPreset`
 
 If `CMakePresets.json` is missing, the command reports an error.
+
+Switch local CMake target from discovered target folders:
+
+```vim
+:CMakeSwitchTarget
+```
+
+This command:
+- reads nearest existing `.vim/.cmake/.config.json`
+- resolves build directory from config `output` (relative to config root)
+- uses config `preset` to scan `<output>/<preset>` when that directory exists, otherwise falls back to `<output>`
+- discovers target directories in `**/CMakeFiles/*.dir`
+- prompts for selection and writes selected target to config key `target`
 
 Set the local CMake preset in `.vim/.cmake/.config.json`:
 
