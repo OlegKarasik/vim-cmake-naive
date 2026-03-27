@@ -69,6 +69,14 @@ function! vim_cmake_naive#reset_config_preset() abort
   endtry
 endfunction
 
+function! vim_cmake_naive#reset_config_target() abort
+  try
+    call s:run_reset_config_target()
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
 function! vim_cmake_naive#set_config_build_config(build_config) abort
   try
     call s:run_set_config_build_config(a:build_config)
@@ -96,6 +104,14 @@ endfunction
 function! vim_cmake_naive#generate() abort
   try
     call s:run_generate()
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#build() abort
+  try
+    call s:run_build()
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -313,15 +329,7 @@ function! s:run_switch(options) abort
         \ : s:resolve_directory_path(a:options.output, l:build_directory, 'output', 0)
 
   let l:source_file_path = s:path_join(l:target_directory, s:default_input_filename)
-  if !filereadable(l:source_file_path)
-    throw 'Source file not found: ' . l:source_file_path
-  endif
-
-  call mkdir(l:output_directory, 'p')
-  let l:destination_file_path = s:path_join(l:output_directory, s:default_input_filename)
-  call writefile(readfile(l:source_file_path, 'b'), l:destination_file_path, 'b')
-
-  call s:write_info('Copied ' . s:default_input_filename . ' to ' . l:destination_file_path)
+  call s:copy_compile_commands_file(l:source_file_path, l:output_directory)
 endfunction
 
 function! s:run_cmake_config() abort
@@ -350,6 +358,10 @@ endfunction
 
 function! s:run_reset_config_preset() abort
   call s:set_config_value(s:cmake_config_preset_key, '')
+endfunction
+
+function! s:run_reset_config_target() abort
+  call s:set_config_value(s:cmake_config_target_key, '')
 endfunction
 
 function! s:run_set_config_build_config(build_config) abort
@@ -418,6 +430,13 @@ function! s:run_switch_target() abort
     return
   endif
 
+  let l:target_directory = s:resolve_selected_target_directory(l:selected_target, l:scan_directory)
+  let l:source_file_path = s:ensure_target_compile_commands(
+        \ l:selected_target,
+        \ l:target_directory,
+        \ l:build_directory,
+        \ l:scan_directory)
+  call s:copy_compile_commands_file(l:source_file_path, l:build_directory)
   call s:set_config_value(s:cmake_config_target_key, l:selected_target, 1)
 endfunction
 
@@ -489,6 +508,201 @@ function! s:target_scan_directory(build_directory, preset_value) abort
 
   let l:preset_directory = s:resolve_path(l:preset_value, a:build_directory)
   return isdirectory(l:preset_directory) ? l:preset_directory : a:build_directory
+endfunction
+
+function! s:resolve_selected_target_directory(target_name, scan_directory) abort
+  if empty(trim(a:target_name))
+    throw 'Missing required argument: <target>.'
+  endif
+  if empty(trim(a:scan_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:direct_directory = s:path_join(
+        \ s:path_join(a:scan_directory, 'CMakeFiles'),
+        \ a:target_name . '.dir')
+  let l:direct_directory = s:normalize_full_path(l:direct_directory)
+  if isdirectory(l:direct_directory)
+    return l:direct_directory
+  endif
+
+  let l:glob_pattern = s:path_join(
+        \ s:path_join(s:path_join(a:scan_directory, '**'), 'CMakeFiles'),
+        \ a:target_name . '.dir')
+  let l:matches = glob(l:glob_pattern, 0, 1)
+  let l:directories = []
+  let l:seen = {}
+
+  for l:match in l:matches
+    if !isdirectory(l:match)
+      continue
+    endif
+
+    let l:normalized_match = s:normalize_full_path(l:match)
+    if !s:is_sub_path_of(l:normalized_match, a:scan_directory) || has_key(l:seen, l:normalized_match)
+      continue
+    endif
+
+    let l:seen[l:normalized_match] = 1
+    call add(l:directories, l:normalized_match)
+  endfor
+
+  if empty(l:directories)
+    throw 'target directory not found for ''' . a:target_name . ''': ' . l:direct_directory
+  endif
+
+  call sort(l:directories)
+  if len(l:directories) > 1
+    let l:relative_directories = []
+    for l:directory in l:directories
+      call add(l:relative_directories, s:relative_path(l:directory, a:scan_directory))
+    endfor
+    throw 'Multiple target directories found for ''' . a:target_name . ''' under '
+          \ . a:scan_directory . ': ' . join(l:relative_directories, ', ')
+  endif
+
+  return l:directories[0]
+endfunction
+
+function! s:resolve_root_compile_commands_path(build_directory, scan_directory) abort
+  if empty(trim(a:build_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+  if empty(trim(a:scan_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:candidates = [s:path_join(a:scan_directory, s:default_input_filename)]
+  if !s:path_equals(a:scan_directory, a:build_directory)
+    call add(l:candidates, s:path_join(a:build_directory, s:default_input_filename))
+  endif
+
+  for l:candidate in l:candidates
+    if filereadable(l:candidate)
+      return l:candidate
+    endif
+  endfor
+
+  if len(l:candidates) == 1
+    throw 'Root ' . s:default_input_filename . ' not found at: ' . l:candidates[0]
+  endif
+
+  throw 'Root ' . s:default_input_filename . ' not found at: '
+        \ . l:candidates[0] . ' or ' . l:candidates[1]
+endfunction
+
+function! s:ensure_target_compile_commands(target_name, target_directory, build_directory, scan_directory) abort
+  if empty(trim(a:target_name))
+    throw 'Missing required argument: <target>.'
+  endif
+  if empty(trim(a:target_directory))
+    throw 'Target directory cannot be empty.'
+  endif
+  if empty(trim(a:build_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+  if empty(trim(a:scan_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:source_file_path = s:path_join(a:target_directory, s:default_input_filename)
+  if filereadable(l:source_file_path)
+    return l:source_file_path
+  endif
+
+  let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
+        \ a:build_directory,
+        \ a:scan_directory)
+  let l:split_build_directory = s:normalize_full_path(fnamemodify(l:root_compile_commands_path, ':h'))
+  call s:write_info(
+        \ 'Target ' . s:default_input_filename . ' is missing for '
+        \ . s:relative_path(a:target_directory, a:scan_directory)
+        \ . '. Splitting root file: '
+        \ . s:relative_path(l:root_compile_commands_path, l:split_build_directory))
+
+  call s:run_split({
+        \ 'build_directory': l:split_build_directory,
+        \ 'input_path': l:root_compile_commands_path,
+        \ 'output_name': s:default_output_filename,
+        \ 'dry_run': 0
+        \ })
+
+  if !filereadable(l:source_file_path)
+    let l:fallback_source_file_path = s:find_target_compile_commands_file(a:target_name, a:build_directory)
+    if !empty(l:fallback_source_file_path)
+      return l:fallback_source_file_path
+    endif
+
+    throw 'Source file not found: ' . l:source_file_path
+  endif
+
+  return l:source_file_path
+endfunction
+
+function! s:find_target_compile_commands_file(target_name, build_directory) abort
+  if empty(trim(a:target_name))
+    throw 'Missing required argument: <target>.'
+  endif
+  if empty(trim(a:build_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:glob_pattern = s:path_join(
+        \ s:path_join(
+        \   s:path_join(s:path_join(a:build_directory, '**'), 'CMakeFiles'),
+        \   a:target_name . '.dir'),
+        \ s:default_input_filename)
+  let l:matches = glob(l:glob_pattern, 0, 1)
+  let l:file_matches = []
+  let l:seen = {}
+
+  for l:match in l:matches
+    if !filereadable(l:match)
+      continue
+    endif
+
+    let l:normalized_match = s:normalize_full_path(l:match)
+    if !s:is_sub_path_of(l:normalized_match, a:build_directory) || has_key(l:seen, l:normalized_match)
+      continue
+    endif
+
+    let l:seen[l:normalized_match] = 1
+    call add(l:file_matches, l:normalized_match)
+  endfor
+
+  if empty(l:file_matches)
+    return ''
+  endif
+
+  call sort(l:file_matches)
+  if len(l:file_matches) > 1
+    let l:relative_matches = []
+    for l:file_path in l:file_matches
+      call add(l:relative_matches, s:relative_path(l:file_path, a:build_directory))
+    endfor
+    throw 'Multiple source files found for target ''' . a:target_name . ''' under '
+          \ . a:build_directory . ': ' . join(l:relative_matches, ', ')
+  endif
+
+  return l:file_matches[0]
+endfunction
+
+function! s:copy_compile_commands_file(source_file_path, output_directory) abort
+  if empty(trim(a:source_file_path))
+    throw 'Source file path cannot be empty.'
+  endif
+  if empty(trim(a:output_directory))
+    throw 'Output directory cannot be empty.'
+  endif
+  if !filereadable(a:source_file_path)
+    throw 'Source file not found: ' . a:source_file_path
+  endif
+
+  call mkdir(a:output_directory, 'p')
+  let l:destination_file_path = s:path_join(a:output_directory, s:default_input_filename)
+  call writefile(readfile(a:source_file_path, 'b'), l:destination_file_path, 'b')
+
+  call s:write_info('Copied ' . s:default_input_filename . ' to ' . l:destination_file_path)
 endfunction
 
 function! s:available_configure_presets(presets_payload, project_root) abort
@@ -867,6 +1081,36 @@ function! s:run_generate() abort
 
   call s:run_shell_command(l:argv)
   call s:write_info('Generated build system in ' . s:relative_path(l:build_directory, l:project_root))
+endfunction
+
+function! s:run_build() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+
+  let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
+  if empty(trim(l:output_value))
+    let l:output_value = s:cmake_config_default_output
+  endif
+
+  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  let l:target_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
+
+  let l:argv = ['cmake', '--build', l:build_directory]
+  if !empty(l:preset_value)
+    call add(l:argv, '--preset')
+    call add(l:argv, l:preset_value)
+  endif
+
+  if !empty(l:target_value)
+    call add(l:argv, '--target')
+    call add(l:argv, l:target_value)
+  endif
+
+  call s:run_shell_command(l:argv)
+  call s:write_info('Built project in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
 function! s:resolve_cmake_project_root(start_directory) abort

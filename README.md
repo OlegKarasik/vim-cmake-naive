@@ -2,15 +2,17 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides nine commands:
+It provides eleven commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
 - `:CMakeSwitchPreset`
 - `:CMakeSwitchTarget`
 - `:CMakeGenerate`
+- `:CMakeBuild`
 - `:CMakeConfigSetPreset <preset>`
-- `:CMakeConfigResetPreset`
+- `:CMakeResetPreset`
+- `:CMakeResetTarget`
 - `:CMakeConfigSetBuild <value>`
 - `:CMakeConfigSetOutput <value>`
 
@@ -68,6 +70,20 @@ This command:
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
 
+Build project with CMake from local config:
+
+```vim
+:CMakeBuild
+```
+
+This command:
+- finds nearest `CMakeLists.txt` from current directory upward
+- finds nearest existing `.vim/.cmake/.config.json`, or creates default config
+  at the discovered CMake project root when none exists
+- runs `cmake --build <output>`
+- adds `--preset <preset>` when config `preset` is non-empty
+- adds `--target <target>` when config `target` is non-empty
+
 Switch local CMake preset from `CMakePresets.json`:
 
 ```vim
@@ -94,6 +110,8 @@ This command:
 - uses config `preset` to scan `<output>/<preset>` when that directory exists, otherwise falls back to `<output>`
 - discovers target directories in `**/CMakeFiles/*.dir`
 - prompts for selection and writes selected target to config key `target`
+- copies selected target `compile_commands.json` to `<output>/compile_commands.json`
+- if selected target file is missing, splits root `compile_commands.json` (found at `<output>/<preset>` or `<output>`) and retries copy
 
 Set the local CMake preset in `.vim/.cmake/.config.json`:
 
@@ -109,10 +127,18 @@ an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
 Reset the local CMake preset to empty:
 
 ```vim
-:CMakeConfigResetPreset
+:CMakeResetPreset
 ```
 
 This creates the config file if needed and sets the `preset` key to `""`.
+
+Reset the local CMake target to empty:
+
+```vim
+:CMakeResetTarget
+```
+
+This creates the config file if needed and sets the `target` key to `""`.
 
 Set local CMake build config in `.vim/.cmake/.config.json`:
 
