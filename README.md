@@ -102,7 +102,7 @@ This command:
 - currently selected preset is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
 - popup title has no trailing `:`
-- popup width is fixed to 30 and height is fixed to 7 lines with scrolling
+- popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 
 If `CMakePresets.json` is missing, the command reports an error.
 
@@ -122,7 +122,7 @@ This command:
 - currently selected target is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
 - popup title has no trailing `:`
-- popup width is fixed to 30 and height is fixed to 7 lines with scrolling
+- popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 - copies selected target `compile_commands.json` to `<output>/compile_commands.json`
 - if selected target file is missing, splits root `compile_commands.json` (found at `<output>/<preset>` or `<output>`) and retries copy
 

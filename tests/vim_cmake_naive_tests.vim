@@ -1062,8 +1062,8 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
     call assert_equal('Select CMake preset', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_preset_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_preset_popup_options, 'maxwidth', 0))
-    call assert_equal(7, get(g:vim_cmake_naive_test_last_preset_popup_options, 'minheight', 0))
-    call assert_equal(7, get(g:vim_cmake_naive_test_last_preset_popup_options, 'maxheight', 0))
+    call assert_equal(3, get(g:vim_cmake_naive_test_last_preset_popup_options, 'minheight', 0))
+    call assert_equal(3, get(g:vim_cmake_naive_test_last_preset_popup_options, 'maxheight', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_preset_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_preset_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderchars', []))
@@ -1499,9 +1499,9 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'zeta'})
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 't11'})
 
-    let l:targets = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta']
+    let l:targets = ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11']
     let l:index = 0
     while l:index < len(l:targets)
       call mkdir(s:path_join(l:fixture.root, 'build/dev/CMakeFiles/' . l:targets[l:index] . '.dir'), 'p')
@@ -1521,19 +1521,19 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
     call vim_cmake_naive#switch_target()
 
     call assert_equal(
-          \ ['1.   alpha', '2.   beta', '3.   delta', '4.   epsilon', '5.   gamma', '6. * zeta'],
+          \ [' 1.   t01', ' 2.   t02', ' 3.   t03', ' 4.   t04', ' 5.   t05', ' 6.   t06', ' 7.   t07', ' 8.   t08', ' 9.   t09', '10.   t10', '11. * t11'],
           \ get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
     call assert_equal('Select CMake target', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxwidth', 0))
-    call assert_equal(7, get(g:vim_cmake_naive_test_last_target_popup_options, 'minheight', 0))
-    call assert_equal(7, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxheight', 0))
+    call assert_equal(10, get(g:vim_cmake_naive_test_last_target_popup_options, 'minheight', 0))
+    call assert_equal(10, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxheight', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_target_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_target_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_target_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderhighlight', []))
-    call assert_equal({'output': 'build', 'preset': 'dev', 'target': 'zeta'}, s:read_json(l:config_path))
+    call assert_equal({'output': 'build', 'preset': 'dev', 'target': 't11'}, s:read_json(l:config_path))
     call assert_equal([json_encode([{'file': '../active-before-popup.cpp'}])], readfile(l:active_commands, 'b'))
   finally
     if l:initial_use_popup is v:null

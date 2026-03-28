@@ -11,7 +11,7 @@ let s:cmake_config_default_output = 'build'
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_popup_fixed_width = 30
-let s:switch_popup_fixed_height = 7
+let s:switch_popup_max_height = 10
 
 function! vim_cmake_naive#split(...) abort
   try
@@ -451,7 +451,12 @@ function! s:show_switch_preset_popup(prompt, items, current_preset) abort
   call popup_menu(l:display_items, l:popup_options)
 endfunction
 
+function! s:switch_popup_height(items) abort
+  return max([1, min([len(a:items), s:switch_popup_max_height])])
+endfunction
+
 function! s:switch_preset_popup_options(prompt, items) abort
+  let l:popup_height = s:switch_popup_height(a:items)
   return {
         \ 'title': a:prompt,
         \ 'highlight': 'Pmenu',
@@ -460,8 +465,8 @@ function! s:switch_preset_popup_options(prompt, items) abort
         \ 'borderhighlight': ['Pmenu'],
         \ 'minwidth': s:switch_popup_fixed_width,
         \ 'maxwidth': s:switch_popup_fixed_width,
-        \ 'minheight': s:switch_popup_fixed_height,
-        \ 'maxheight': s:switch_popup_fixed_height,
+        \ 'minheight': l:popup_height,
+        \ 'maxheight': l:popup_height,
         \ 'scrollbar': 1,
         \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
         \ }
