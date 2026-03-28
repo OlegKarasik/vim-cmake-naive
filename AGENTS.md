@@ -7,6 +7,6 @@
 
 # Popup Rules
 
-1. All popups with titles have single line borders.
-2. All popups with titles have standard gray colours.
+1. All popups with titles have smooth, single line borders (as modern Vim popups).
+2. All popups with titles have standard light-gray colours.
 3. All popups with titles DO NOT have ':' at the end.

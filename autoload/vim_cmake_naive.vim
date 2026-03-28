@@ -12,6 +12,7 @@ let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_preset_popup_highlight = 'VimCMakeNaivePresetPopup'
 let s:switch_preset_popup_border_highlight = 'VimCMakeNaivePresetPopupBorder'
+let s:switch_target_popup_max_visible_items = 5
 
 function! vim_cmake_naive#split(...) abort
   try
@@ -457,7 +458,7 @@ function! s:switch_preset_popup_options(prompt, items) abort
         \ 'title': a:prompt,
         \ 'highlight': s:switch_preset_popup_highlight,
         \ 'border': [1, 1, 1, 1],
-        \ 'borderchars': ['-', '|', '-', '|', '+', '+', '+', '+'],
+        \ 'borderchars': ['─', '│', '─', '│', '╭', '╮', '╯', '╰'],
         \ 'borderhighlight': [s:switch_preset_popup_border_highlight],
         \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
         \ }
@@ -465,9 +466,9 @@ endfunction
 
 function! s:ensure_switch_preset_popup_highlights() abort
   execute 'highlight default ' . s:switch_preset_popup_highlight
-        \ . ' ctermfg=white ctermbg=darkgray guifg=#e6e6e6 guibg=#5f5f5f'
+        \ . ' ctermfg=black ctermbg=lightgray guifg=#1c1c1c guibg=#d3d3d3'
   execute 'highlight default ' . s:switch_preset_popup_border_highlight
-        \ . ' ctermfg=lightgray ctermbg=darkgray guifg=#b0b0b0 guibg=#5f5f5f'
+        \ . ' ctermfg=darkgray ctermbg=lightgray guifg=#6c6c6c guibg=#d3d3d3'
 endfunction
 
 function! s:preset_popup_display_items(items, current_preset) abort
@@ -506,9 +507,11 @@ function! s:run_switch_target() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
   let l:config = s:read_json_object(l:config_path)
+  let l:selection_prompt = 'Select CMake target'
   let l:project_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  let l:current_target = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
   if empty(trim(l:output_value))
     let l:output_value = s:cmake_config_default_output
   endif
@@ -524,20 +527,79 @@ function! s:run_switch_target() abort
     throw 'No selectable targets found in directory: ' . l:scan_directory
   endif
 
-  let l:selected_target = s:select_item_from_list('Select CMake target:', l:targets)
+  if s:should_use_popup_menu_for_preset_selection()
+    call s:show_switch_target_popup(
+          \ l:selection_prompt,
+          \ l:targets,
+          \ l:current_target,
+          \ l:build_directory,
+          \ l:scan_directory)
+    return
+  endif
+
+  let l:selected_target = s:select_item_from_list(l:selection_prompt, l:targets)
   if empty(l:selected_target)
     call s:write_info('Target selection canceled.')
     return
   endif
 
-  let l:target_directory = s:resolve_selected_target_directory(l:selected_target, l:scan_directory)
+  call s:apply_switch_target_selection(l:selected_target, l:build_directory, l:scan_directory)
+endfunction
+
+function! s:show_switch_target_popup(prompt, items, current_target, build_directory, scan_directory) abort
+  let l:display_items = s:preset_popup_display_items(a:items, a:current_target)
+  let l:popup_options = s:switch_target_popup_options(a:prompt, a:items, a:build_directory, a:scan_directory)
+  if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let g:vim_cmake_naive_test_last_target_popup_items = copy(l:display_items)
+    let g:vim_cmake_naive_test_last_target_popup_options = copy(l:popup_options)
+    call s:on_switch_target_popup_selection(
+          \ copy(a:items),
+          \ a:build_directory,
+          \ a:scan_directory,
+          \ 0,
+          \ g:vim_cmake_naive_test_popup_menu_response)
+    return
+  endif
+
+  call popup_menu(l:display_items, l:popup_options)
+endfunction
+
+function! s:switch_target_popup_options(prompt, items, build_directory, scan_directory) abort
+  let l:popup_options = s:switch_preset_popup_options(a:prompt, a:items)
+  let l:popup_options.maxheight = min([len(a:items), s:switch_target_popup_max_visible_items])
+  let l:popup_options.scrollbar = 1
+  let l:popup_options.callback = function(
+        \ 's:on_switch_target_popup_selection',
+        \ [copy(a:items), a:build_directory, a:scan_directory])
+  return l:popup_options
+endfunction
+
+function! s:on_switch_target_popup_selection(items, build_directory, scan_directory, _popup_id, result) abort
+  let l:index = type(a:result) == v:t_number
+        \ ? a:result
+        \ : str2nr(s:to_string_or_empty(a:result))
+  if l:index <= 0 || l:index > len(a:items)
+    call s:write_info('Target selection canceled.')
+    return
+  endif
+
+  let l:selected_target = a:items[l:index - 1]
+  try
+    call s:apply_switch_target_selection(l:selected_target, a:build_directory, a:scan_directory)
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! s:apply_switch_target_selection(selected_target, build_directory, scan_directory) abort
+  let l:target_directory = s:resolve_selected_target_directory(a:selected_target, a:scan_directory)
   let l:source_file_path = s:ensure_target_compile_commands(
-        \ l:selected_target,
+        \ a:selected_target,
         \ l:target_directory,
-        \ l:build_directory,
-        \ l:scan_directory)
-  call s:copy_compile_commands_file(l:source_file_path, l:build_directory)
-  call s:set_config_value(s:cmake_config_target_key, l:selected_target, 1)
+        \ a:build_directory,
+        \ a:scan_directory)
+  call s:copy_compile_commands_file(l:source_file_path, a:build_directory)
+  call s:set_config_value(s:cmake_config_target_key, a:selected_target, 1)
 endfunction
 
 function! s:available_targets(build_directory, preset_value) abort

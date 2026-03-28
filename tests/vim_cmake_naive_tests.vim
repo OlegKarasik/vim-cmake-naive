@@ -1061,7 +1061,7 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
           \ get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
     call assert_equal('Select CMake preset', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_preset_popup_options, 'border', []))
-    call assert_equal(['-', '|', '-', '|', '+', '+', '+', '+'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderchars', []))
+    call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderchars', []))
     call assert_equal('VimCMakeNaivePresetPopup', get(g:vim_cmake_naive_test_last_preset_popup_options, 'highlight', ''))
     call assert_equal(['VimCMakeNaivePresetPopupBorder'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderhighlight', []))
     call assert_equal({'preset': 'dev'}, s:read_json(l:config_path))
@@ -1105,6 +1105,8 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -1135,6 +1137,76 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
     endif
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_target_popup_sets_selected_target() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
+  let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
+
+    let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
+    let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
+    let l:target_app_commands = s:path_join(l:target_app, 'compile_commands.json')
+    let l:target_lib_commands = s:path_join(l:target_lib, 'compile_commands.json')
+    call mkdir(l:target_app, 'p')
+    call mkdir(l:target_lib, 'p')
+    call s:write_json(l:target_app_commands, [{'file': '../src/main.cpp'}])
+    call s:write_json(l:target_lib_commands, [{'file': '../lib/foo.cpp'}])
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_use_popup_menu = 1
+    let g:vim_cmake_naive_test_popup_menu_response = 2
+    unlet! g:vim_cmake_naive_test_menu_response
+    unlet! g:vim_cmake_naive_test_inputlist_response
+    call vim_cmake_naive#switch_target()
+
+    let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
+    call assert_equal(
+          \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'keep': 1},
+          \ s:read_json(l:config_path))
+    call assert_true(filereadable(l:active_commands))
+    call assert_equal(readfile(l:target_lib_commands, 'b'), readfile(l:active_commands, 'b'))
+  finally
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
+    endif
+    if l:initial_inputlist_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_inputlist_selection
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -1144,6 +1216,8 @@ function! s:test_cmake_switch_target_falls_back_when_preset_dir_missing() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -1170,6 +1244,16 @@ function! s:test_cmake_switch_target_falls_back_when_preset_dir_missing() abort
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
     endif
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -1179,6 +1263,8 @@ function! s:test_cmake_switch_target_cancels_without_changing_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -1200,6 +1286,16 @@ function! s:test_cmake_switch_target_cancels_without_changing_config() abort
       unlet! g:vim_cmake_naive_test_inputlist_response
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -1251,6 +1347,8 @@ function! s:test_cmake_switch_target_splits_root_when_selected_target_file_missi
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -1279,6 +1377,16 @@ function! s:test_cmake_switch_target_splits_root_when_selected_target_file_missi
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
     endif
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -1288,6 +1396,8 @@ function! s:test_cmake_switch_target_reports_missing_root_compile_commands_for_s
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -1309,6 +1419,16 @@ function! s:test_cmake_switch_target_reports_missing_root_compile_commands_for_s
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
     endif
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -1318,6 +1438,8 @@ function! s:test_cmake_switch_target_uses_output_root_compile_commands_when_pres
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
@@ -1344,6 +1466,97 @@ function! s:test_cmake_switch_target_uses_output_root_compile_commands_when_pres
       unlet! g:vim_cmake_naive_test_inputlist_response
     else
       let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_switch_target_popup_display_items_marks_current_selection_and_limits_height() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
+  let l:initial_popup_items = get(g:, 'vim_cmake_naive_test_last_target_popup_items', v:null)
+  let l:initial_popup_options = get(g:, 'vim_cmake_naive_test_last_target_popup_options', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
+  let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'zeta'})
+
+    let l:targets = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta']
+    let l:index = 0
+    while l:index < len(l:targets)
+      call mkdir(s:path_join(l:fixture.root, 'build/dev/CMakeFiles/' . l:targets[l:index] . '.dir'), 'p')
+      let l:index += 1
+    endwhile
+
+    let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
+    call s:write_json(l:active_commands, [{'file': '../active-before-popup.cpp'}])
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_use_popup_menu = 1
+    let g:vim_cmake_naive_test_popup_menu_response = 0
+    unlet! g:vim_cmake_naive_test_menu_response
+    unlet! g:vim_cmake_naive_test_inputlist_response
+    unlet! g:vim_cmake_naive_test_last_target_popup_items
+    unlet! g:vim_cmake_naive_test_last_target_popup_options
+    call vim_cmake_naive#switch_target()
+
+    call assert_equal(
+          \ ['1.   alpha', '2.   beta', '3.   delta', '4.   epsilon', '5.   gamma', '6. * zeta'],
+          \ get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
+    call assert_equal('Select CMake target', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
+    call assert_equal(5, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxheight', 0))
+    call assert_equal(1, get(g:vim_cmake_naive_test_last_target_popup_options, 'scrollbar', 0))
+    call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_target_popup_options, 'border', []))
+    call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderchars', []))
+    call assert_equal('VimCMakeNaivePresetPopup', get(g:vim_cmake_naive_test_last_target_popup_options, 'highlight', ''))
+    call assert_equal(['VimCMakeNaivePresetPopupBorder'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderhighlight', []))
+    call assert_equal({'output': 'build', 'preset': 'dev', 'target': 'zeta'}, s:read_json(l:config_path))
+    call assert_equal([json_encode([{'file': '../active-before-popup.cpp'}])], readfile(l:active_commands, 'b'))
+  finally
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
+    if l:initial_popup_items is v:null
+      unlet! g:vim_cmake_naive_test_last_target_popup_items
+    else
+      let g:vim_cmake_naive_test_last_target_popup_items = l:initial_popup_items
+    endif
+    if l:initial_popup_options is v:null
+      unlet! g:vim_cmake_naive_test_last_target_popup_options
+    else
+      let g:vim_cmake_naive_test_last_target_popup_options = l:initial_popup_options
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
+    endif
+    if l:initial_inputlist_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_inputlist_selection
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -1393,6 +1606,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_preset_reports_no_selectable_presets()
   call s:test_preset_popup_display_items_formats_ordered_list_and_current_marker()
   call s:test_cmake_switch_target_sets_selected_target()
+  call s:test_cmake_switch_target_popup_sets_selected_target()
   call s:test_cmake_switch_target_falls_back_when_preset_dir_missing()
   call s:test_cmake_switch_target_cancels_without_changing_config()
   call s:test_cmake_switch_target_reports_missing_build_directory()
@@ -1400,4 +1614,5 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_target_splits_root_when_selected_target_file_missing()
   call s:test_cmake_switch_target_reports_missing_root_compile_commands_for_split()
   call s:test_cmake_switch_target_uses_output_root_compile_commands_when_preset_root_missing_file()
+  call s:test_switch_target_popup_display_items_marks_current_selection_and_limits_height()
 endfunction

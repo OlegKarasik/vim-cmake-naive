@@ -114,7 +114,10 @@ This command:
 - resolves build directory from config `output` (relative to config root)
 - uses config `preset` to scan `<output>/<preset>` when that directory exists, otherwise falls back to `<output>`
 - discovers target directories in `**/CMakeFiles/*.dir`
-- prompts for selection and writes selected target to config key `target`
+- prompts through a popup menu for selection (fallback to inputlist) and writes selected target to config key `target`
+- popup entries are ordered and prefixed with a number
+- currently selected target is marked with `*`
+- popup shows at most 5 targets at once and supports scrolling for longer lists
 - copies selected target `compile_commands.json` to `<output>/compile_commands.json`
 - if selected target file is missing, splits root `compile_commands.json` (found at `<output>/<preset>` or `<output>`) and retries copy
 
