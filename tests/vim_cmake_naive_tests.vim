@@ -1037,6 +1037,7 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
   let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
   let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
   let l:initial_popup_items = get(g:, 'vim_cmake_naive_test_last_preset_popup_items', v:null)
+  let l:initial_popup_options = get(g:, 'vim_cmake_naive_test_last_preset_popup_options', v:null)
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
@@ -1056,8 +1057,13 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(
-          \ ['1. default', '2. dev *', '3. release'],
+          \ ['1.   default', '2. * dev', '3.   release'],
           \ get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
+    call assert_equal('Select CMake preset', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
+    call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_preset_popup_options, 'border', []))
+    call assert_equal(['-', '|', '-', '|', '+', '+', '+', '+'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderchars', []))
+    call assert_equal('VimCMakeNaivePresetPopup', get(g:vim_cmake_naive_test_last_preset_popup_options, 'highlight', ''))
+    call assert_equal(['VimCMakeNaivePresetPopupBorder'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderhighlight', []))
     call assert_equal({'preset': 'dev'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -1074,6 +1080,11 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
       unlet! g:vim_cmake_naive_test_last_preset_popup_items
     else
       let g:vim_cmake_naive_test_last_preset_popup_items = l:initial_popup_items
+    endif
+    if l:initial_popup_options is v:null
+      unlet! g:vim_cmake_naive_test_last_preset_popup_options
+    else
+      let g:vim_cmake_naive_test_last_preset_popup_options = l:initial_popup_options
     endif
     if l:initial_menu_selection is v:null
       unlet! g:vim_cmake_naive_test_menu_response

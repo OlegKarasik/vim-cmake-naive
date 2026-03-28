@@ -10,6 +10,8 @@ let s:cmake_config_default_build = 'Debug'
 let s:cmake_config_default_output = 'build'
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
+let s:switch_preset_popup_highlight = 'VimCMakeNaivePresetPopup'
+let s:switch_preset_popup_border_highlight = 'VimCMakeNaivePresetPopupBorder'
 
 function! vim_cmake_naive#split(...) abort
   try
@@ -383,6 +385,7 @@ endfunction
 function! s:run_switch_preset() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:selection_prompt = 'Select CMake preset'
   let l:presets_path = s:cmake_presets_path(l:project_root)
   if !filereadable(l:presets_path)
     throw s:cmake_presets_filename . ' not found at project root: ' . l:presets_path
@@ -397,11 +400,11 @@ function! s:run_switch_preset() abort
   endif
 
   if s:should_use_popup_menu_for_preset_selection()
-    call s:show_switch_preset_popup('Select CMake preset:', l:available_presets, l:current_preset)
+    call s:show_switch_preset_popup(l:selection_prompt, l:available_presets, l:current_preset)
     return
   endif
 
-  let l:selected_preset = s:select_item_from_menu('Select CMake preset:', l:available_presets)
+  let l:selected_preset = s:select_item_from_menu(l:selection_prompt, l:available_presets)
   if empty(l:selected_preset)
     call s:write_info('Preset selection canceled.')
     return
@@ -437,27 +440,44 @@ endfunction
 
 function! s:show_switch_preset_popup(prompt, items, current_preset) abort
   let l:display_items = s:preset_popup_display_items(a:items, a:current_preset)
+  let l:popup_options = s:switch_preset_popup_options(a:prompt, a:items)
   if exists('g:vim_cmake_naive_test_popup_menu_response')
     let g:vim_cmake_naive_test_last_preset_popup_items = copy(l:display_items)
+    let g:vim_cmake_naive_test_last_preset_popup_options = copy(l:popup_options)
     call s:on_switch_preset_popup_selection(copy(a:items), 0, g:vim_cmake_naive_test_popup_menu_response)
     return
   endif
 
-  call popup_menu(l:display_items, {
+  call popup_menu(l:display_items, l:popup_options)
+endfunction
+
+function! s:switch_preset_popup_options(prompt, items) abort
+  call s:ensure_switch_preset_popup_highlights()
+  return {
         \ 'title': a:prompt,
+        \ 'highlight': s:switch_preset_popup_highlight,
+        \ 'border': [1, 1, 1, 1],
+        \ 'borderchars': ['-', '|', '-', '|', '+', '+', '+', '+'],
+        \ 'borderhighlight': [s:switch_preset_popup_border_highlight],
         \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
-        \ })
+        \ }
+endfunction
+
+function! s:ensure_switch_preset_popup_highlights() abort
+  execute 'highlight default ' . s:switch_preset_popup_highlight
+        \ . ' ctermfg=white ctermbg=darkgray guifg=#e6e6e6 guibg=#5f5f5f'
+  execute 'highlight default ' . s:switch_preset_popup_border_highlight
+        \ . ' ctermfg=lightgray ctermbg=darkgray guifg=#b0b0b0 guibg=#5f5f5f'
 endfunction
 
 function! s:preset_popup_display_items(items, current_preset) abort
   let l:display_items = []
+  let l:number_width = strlen(string(len(a:items)))
   let l:index = 0
   while l:index < len(a:items)
     let l:item = a:items[l:index]
-    let l:display_item = (l:index + 1) . '. ' . l:item
-    if !empty(a:current_preset) && l:item ==# a:current_preset
-      let l:display_item .= ' *'
-    endif
+    let l:marker = (!empty(a:current_preset) && l:item ==# a:current_preset) ? '*' : ' '
+    let l:display_item = printf('%' . l:number_width . 'd.', l:index + 1) . ' ' . l:marker . ' ' . l:item
     call add(l:display_items, l:display_item)
     let l:index += 1
   endwhile
