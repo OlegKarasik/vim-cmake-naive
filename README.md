@@ -100,6 +100,9 @@ This command:
 - prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetPreset`
 - popup entries are ordered and prefixed with a number
 - currently selected preset is marked with `*`
+- popup uses smooth single-line borders with standard Vim popup colors
+- popup title has no trailing `:`
+- popup width is fixed to 30 and height is fixed to 7 lines with scrolling
 
 If `CMakePresets.json` is missing, the command reports an error.
 
@@ -117,7 +120,9 @@ This command:
 - prompts through a popup menu for selection (fallback to inputlist) and writes selected target to config key `target`
 - popup entries are ordered and prefixed with a number
 - currently selected target is marked with `*`
-- popup shows at most 5 targets at once and supports scrolling for longer lists
+- popup uses smooth single-line borders with standard Vim popup colors
+- popup title has no trailing `:`
+- popup width is fixed to 30 and height is fixed to 7 lines with scrolling
 - copies selected target `compile_commands.json` to `<output>/compile_commands.json`
 - if selected target file is missing, splits root `compile_commands.json` (found at `<output>/<preset>` or `<output>`) and retries copy
 

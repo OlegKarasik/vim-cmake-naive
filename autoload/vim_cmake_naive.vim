@@ -10,9 +10,8 @@ let s:cmake_config_default_build = 'Debug'
 let s:cmake_config_default_output = 'build'
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
-let s:switch_preset_popup_highlight = 'VimCMakeNaivePresetPopup'
-let s:switch_preset_popup_border_highlight = 'VimCMakeNaivePresetPopupBorder'
-let s:switch_target_popup_max_visible_items = 5
+let s:switch_popup_fixed_width = 30
+let s:switch_popup_fixed_height = 7
 
 function! vim_cmake_naive#split(...) abort
   try
@@ -453,22 +452,19 @@ function! s:show_switch_preset_popup(prompt, items, current_preset) abort
 endfunction
 
 function! s:switch_preset_popup_options(prompt, items) abort
-  call s:ensure_switch_preset_popup_highlights()
   return {
         \ 'title': a:prompt,
-        \ 'highlight': s:switch_preset_popup_highlight,
+        \ 'highlight': 'Pmenu',
         \ 'border': [1, 1, 1, 1],
         \ 'borderchars': ['─', '│', '─', '│', '╭', '╮', '╯', '╰'],
-        \ 'borderhighlight': [s:switch_preset_popup_border_highlight],
+        \ 'borderhighlight': ['Pmenu'],
+        \ 'minwidth': s:switch_popup_fixed_width,
+        \ 'maxwidth': s:switch_popup_fixed_width,
+        \ 'minheight': s:switch_popup_fixed_height,
+        \ 'maxheight': s:switch_popup_fixed_height,
+        \ 'scrollbar': 1,
         \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
         \ }
-endfunction
-
-function! s:ensure_switch_preset_popup_highlights() abort
-  execute 'highlight default ' . s:switch_preset_popup_highlight
-        \ . ' ctermfg=black ctermbg=lightgray guifg=#1c1c1c guibg=#d3d3d3'
-  execute 'highlight default ' . s:switch_preset_popup_border_highlight
-        \ . ' ctermfg=darkgray ctermbg=lightgray guifg=#6c6c6c guibg=#d3d3d3'
 endfunction
 
 function! s:preset_popup_display_items(items, current_preset) abort
@@ -566,8 +562,6 @@ endfunction
 
 function! s:switch_target_popup_options(prompt, items, build_directory, scan_directory) abort
   let l:popup_options = s:switch_preset_popup_options(a:prompt, a:items)
-  let l:popup_options.maxheight = min([len(a:items), s:switch_target_popup_max_visible_items])
-  let l:popup_options.scrollbar = 1
   let l:popup_options.callback = function(
         \ 's:on_switch_target_popup_selection',
         \ [copy(a:items), a:build_directory, a:scan_directory])

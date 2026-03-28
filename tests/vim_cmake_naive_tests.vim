@@ -1060,10 +1060,15 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
           \ ['1.   default', '2. * dev', '3.   release'],
           \ get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
     call assert_equal('Select CMake preset', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
+    call assert_equal(30, get(g:vim_cmake_naive_test_last_preset_popup_options, 'minwidth', 0))
+    call assert_equal(30, get(g:vim_cmake_naive_test_last_preset_popup_options, 'maxwidth', 0))
+    call assert_equal(7, get(g:vim_cmake_naive_test_last_preset_popup_options, 'minheight', 0))
+    call assert_equal(7, get(g:vim_cmake_naive_test_last_preset_popup_options, 'maxheight', 0))
+    call assert_equal(1, get(g:vim_cmake_naive_test_last_preset_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_preset_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderchars', []))
-    call assert_equal('VimCMakeNaivePresetPopup', get(g:vim_cmake_naive_test_last_preset_popup_options, 'highlight', ''))
-    call assert_equal(['VimCMakeNaivePresetPopupBorder'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderhighlight', []))
+    call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_preset_popup_options, 'highlight', ''))
+    call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderhighlight', []))
     call assert_equal({'preset': 'dev'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -1519,12 +1524,15 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
           \ ['1.   alpha', '2.   beta', '3.   delta', '4.   epsilon', '5.   gamma', '6. * zeta'],
           \ get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
     call assert_equal('Select CMake target', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
-    call assert_equal(5, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxheight', 0))
+    call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'minwidth', 0))
+    call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxwidth', 0))
+    call assert_equal(7, get(g:vim_cmake_naive_test_last_target_popup_options, 'minheight', 0))
+    call assert_equal(7, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxheight', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_target_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_target_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderchars', []))
-    call assert_equal('VimCMakeNaivePresetPopup', get(g:vim_cmake_naive_test_last_target_popup_options, 'highlight', ''))
-    call assert_equal(['VimCMakeNaivePresetPopupBorder'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderhighlight', []))
+    call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_target_popup_options, 'highlight', ''))
+    call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderhighlight', []))
     call assert_equal({'output': 'build', 'preset': 'dev', 'target': 'zeta'}, s:read_json(l:config_path))
     call assert_equal([json_encode([{'file': '../active-before-popup.cpp'}])], readfile(l:active_commands, 'b'))
   finally
