@@ -381,6 +381,7 @@ function! s:run_set_config_output(output) abort
 endfunction
 
 function! s:run_switch_preset() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root(getcwd())
   let l:presets_path = s:cmake_presets_path(l:project_root)
   if !filereadable(l:presets_path)
@@ -390,12 +391,13 @@ function! s:run_switch_preset() abort
   let l:presets_payload = s:read_json_object(l:presets_path)
   let l:available_presets = s:available_configure_presets(l:presets_payload, l:project_root)
   call sort(l:available_presets)
+  let l:current_preset = s:current_config_preset_for_switch(l:working_directory)
   if empty(l:available_presets)
     throw 'No selectable configure presets found in ' . s:cmake_presets_filename . '.'
   endif
 
   if s:should_use_popup_menu_for_preset_selection()
-    call s:show_switch_preset_popup('Select CMake preset:', l:available_presets)
+    call s:show_switch_preset_popup('Select CMake preset:', l:available_presets, l:current_preset)
     return
   endif
 
@@ -408,17 +410,59 @@ function! s:run_switch_preset() abort
   call s:run_set_config_preset(l:selected_preset)
 endfunction
 
+function! s:current_config_preset_for_switch(start_directory) abort
+  try
+    let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
+  catch
+    let l:message = s:format_exception(v:exception)
+    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0
+      return ''
+    endif
+    throw l:message
+  endtry
+
+  let l:config = s:read_json_object(l:config_path)
+  return trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+endfunction
+
 function! s:should_use_popup_menu_for_preset_selection() abort
+  if exists('g:vim_cmake_naive_test_use_popup_menu')
+    return s:as_condition_bool(g:vim_cmake_naive_test_use_popup_menu)
+  endif
+
   return exists('*popup_menu')
         \ && !exists('g:vim_cmake_naive_test_menu_response')
         \ && !exists('g:vim_cmake_naive_test_inputlist_response')
 endfunction
 
-function! s:show_switch_preset_popup(prompt, items) abort
-  call popup_menu(copy(a:items), {
+function! s:show_switch_preset_popup(prompt, items, current_preset) abort
+  let l:display_items = s:preset_popup_display_items(a:items, a:current_preset)
+  if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let g:vim_cmake_naive_test_last_preset_popup_items = copy(l:display_items)
+    call s:on_switch_preset_popup_selection(copy(a:items), 0, g:vim_cmake_naive_test_popup_menu_response)
+    return
+  endif
+
+  call popup_menu(l:display_items, {
         \ 'title': a:prompt,
         \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
         \ })
+endfunction
+
+function! s:preset_popup_display_items(items, current_preset) abort
+  let l:display_items = []
+  let l:index = 0
+  while l:index < len(a:items)
+    let l:item = a:items[l:index]
+    let l:display_item = (l:index + 1) . '. ' . l:item
+    if !empty(a:current_preset) && l:item ==# a:current_preset
+      let l:display_item .= ' *'
+    endif
+    call add(l:display_items, l:display_item)
+    let l:index += 1
+  endwhile
+
+  return l:display_items
 endfunction
 
 function! s:on_switch_preset_popup_selection(items, _popup_id, result) abort

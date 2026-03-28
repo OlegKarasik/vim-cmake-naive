@@ -98,6 +98,8 @@ This command:
 - reads `CMakePresets.json` at that project root
 - lists selectable configure presets (non-hidden, condition evaluates to true) in sorted order
 - prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetPreset`
+- popup entries are ordered and prefixed with a number
+- currently selected preset is marked with `*`
 
 If `CMakePresets.json` is missing, the command reports an error.
 
