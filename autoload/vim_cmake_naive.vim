@@ -12,6 +12,24 @@ let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
+let s:switch_target_popup_states = {}
+let s:build_preview_height = 15
+let s:build_preview_buffer_name = '[vim-cmake-naive-build]'
+let s:cmake_menu_prompt = 'Select CMake command'
+let s:cmake_menu_command_specs = [
+      \ {'name': 'CMakeConfig', 'needs_args': 0},
+      \ {'name': 'CMakeConfigDefault', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchTarget', 'needs_args': 0},
+      \ {'name': 'CMakeGenerate', 'needs_args': 0},
+      \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeMenu', 'needs_args': 0},
+      \ {'name': 'CMakeResetPreset', 'needs_args': 0},
+      \ {'name': 'CMakeResetTarget', 'needs_args': 0},
+      \ {'name': 'CMakeConfigSetPreset', 'needs_args': 1},
+      \ {'name': 'CMakeConfigSetBuild', 'needs_args': 1},
+      \ {'name': 'CMakeConfigSetOutput', 'needs_args': 1}
+      \ ]
 
 function! vim_cmake_naive#split(...) abort
   try
@@ -114,6 +132,14 @@ endfunction
 function! vim_cmake_naive#build() abort
   try
     call s:run_build()
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#menu() abort
+  try
+    call s:run_menu()
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -413,6 +439,101 @@ function! s:run_switch_preset() abort
   call s:run_set_config_preset(l:selected_preset)
 endfunction
 
+function! s:run_menu() abort
+  let l:commands = s:menu_commands()
+  if empty(l:commands)
+    throw 'No selectable CMake commands found.'
+  endif
+
+  if s:should_use_popup_menu_for_preset_selection()
+    call s:show_menu_popup(s:cmake_menu_prompt, l:commands)
+    return
+  endif
+
+  let l:selected_command = s:select_item_from_list(s:cmake_menu_prompt, l:commands)
+  if empty(l:selected_command)
+    call s:write_info('CMake command selection canceled.')
+    return
+  endif
+
+  call s:execute_menu_command(l:selected_command)
+endfunction
+
+function! s:menu_commands() abort
+  let l:commands = []
+  for l:command_spec in s:cmake_menu_command_specs
+    let l:command_name = s:to_string_or_empty(get(l:command_spec, 'name', ''))
+    if exists(':' . l:command_name) == 2
+      call add(l:commands, l:command_name)
+    endif
+  endfor
+
+  return l:commands
+endfunction
+
+function! s:show_menu_popup(prompt, commands) abort
+  let l:display_items = s:preset_popup_display_items(a:commands, '')
+  let l:popup_options = s:switch_preset_popup_options(a:prompt, a:commands)
+  if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let g:vim_cmake_naive_test_last_menu_popup_items = copy(l:display_items)
+    let g:vim_cmake_naive_test_last_menu_popup_options = copy(l:popup_options)
+    call s:on_menu_popup_selection(copy(a:commands), 0, g:vim_cmake_naive_test_popup_menu_response)
+    return
+  endif
+
+  let l:popup_options.callback = function('s:on_menu_popup_selection', [copy(a:commands)])
+  call popup_menu(l:display_items, l:popup_options)
+endfunction
+
+function! s:on_menu_popup_selection(commands, _popup_id, result) abort
+  let l:index = type(a:result) == v:t_number
+        \ ? a:result
+        \ : str2nr(s:to_string_or_empty(a:result))
+  if l:index <= 0 || l:index > len(a:commands)
+    call s:write_info('CMake command selection canceled.')
+    return
+  endif
+
+  let l:selected_command = a:commands[l:index - 1]
+  call s:execute_menu_command(l:selected_command)
+endfunction
+
+function! s:execute_menu_command(command_name) abort
+  let l:command_spec = s:menu_command_spec(a:command_name)
+  let l:command_arguments = ''
+  if get(l:command_spec, 'needs_args', 0)
+    let l:command_arguments = s:menu_command_arguments(a:command_name)
+    if empty(trim(l:command_arguments))
+      call s:write_info(a:command_name . ' canceled.')
+      return
+    endif
+  endif
+
+  let l:command_line = 'silent ' . a:command_name
+  if !empty(l:command_arguments)
+    let l:command_line .= ' ' . l:command_arguments
+  endif
+  execute l:command_line
+endfunction
+
+function! s:menu_command_spec(command_name) abort
+  for l:command_spec in s:cmake_menu_command_specs
+    if s:to_string_or_empty(get(l:command_spec, 'name', '')) ==# a:command_name
+      return l:command_spec
+    endif
+  endfor
+
+  return {'name': a:command_name, 'needs_args': 0}
+endfunction
+
+function! s:menu_command_arguments(command_name) abort
+  if exists('g:vim_cmake_naive_test_menu_command_args')
+    return s:to_string_or_empty(get(g:vim_cmake_naive_test_menu_command_args, a:command_name, ''))
+  endif
+
+  return input('Arguments for ' . a:command_name . ': ')
+endfunction
+
 function! s:current_config_preset_for_switch(start_directory) abort
   try
     let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
@@ -455,7 +576,7 @@ function! s:switch_popup_height(items) abort
   return max([1, min([len(a:items), s:switch_popup_max_height])])
 endfunction
 
-function! s:switch_preset_popup_options(prompt, items) abort
+function! s:switch_popup_options(prompt, items) abort
   let l:popup_height = s:switch_popup_height(a:items)
   return {
         \ 'title': a:prompt,
@@ -467,9 +588,14 @@ function! s:switch_preset_popup_options(prompt, items) abort
         \ 'maxwidth': s:switch_popup_fixed_width,
         \ 'minheight': l:popup_height,
         \ 'maxheight': l:popup_height,
-        \ 'scrollbar': 1,
-        \ 'callback': function('s:on_switch_preset_popup_selection', [copy(a:items)])
+        \ 'scrollbar': 1
         \ }
+endfunction
+
+function! s:switch_preset_popup_options(prompt, items) abort
+  let l:popup_options = s:switch_popup_options(a:prompt, a:items)
+  let l:popup_options.callback = function('s:on_switch_preset_popup_selection', [copy(a:items)])
+  return l:popup_options
 endfunction
 
 function! s:preset_popup_display_items(items, current_preset) abort
@@ -533,6 +659,7 @@ function! s:run_switch_target() abort
           \ l:selection_prompt,
           \ l:targets,
           \ l:current_target,
+          \ l:preset_value,
           \ l:build_directory,
           \ l:scan_directory)
     return
@@ -544,57 +671,177 @@ function! s:run_switch_target() abort
     return
   endif
 
-  call s:apply_switch_target_selection(l:selected_target, l:build_directory, l:scan_directory)
+  call s:apply_switch_target_selection(l:selected_target, l:preset_value, l:build_directory, l:scan_directory)
 endfunction
 
-function! s:show_switch_target_popup(prompt, items, current_target, build_directory, scan_directory) abort
-  let l:display_items = s:preset_popup_display_items(a:items, a:current_target)
-  let l:popup_options = s:switch_target_popup_options(a:prompt, a:items, a:build_directory, a:scan_directory)
+function! s:show_switch_target_popup(prompt, items, current_target, preset_value, build_directory, scan_directory) abort
+  let l:state = {
+        \ 'prompt': a:prompt,
+        \ 'all_items': copy(a:items),
+        \ 'filtered_items': copy(a:items),
+        \ 'query': '',
+        \ 'current_target': a:current_target,
+        \ 'preset_value': a:preset_value,
+        \ 'build_directory': a:build_directory,
+        \ 'scan_directory': a:scan_directory
+        \ }
   if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let l:test_response = g:vim_cmake_naive_test_popup_menu_response
+    let l:test_result = l:test_response
+    if type(l:test_response) == v:t_dict
+      let l:state.query = s:to_string_or_empty(get(l:test_response, 'query', ''))
+      let l:test_result = get(l:test_response, 'result', 0)
+    endif
+    let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+    let l:display_items = s:switch_target_popup_display_items(l:state.filtered_items, l:state.current_target)
+    let l:popup_options = s:switch_target_popup_options(a:prompt, l:display_items, l:state.query)
     let g:vim_cmake_naive_test_last_target_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_target_popup_options = copy(l:popup_options)
-    call s:on_switch_target_popup_selection(
-          \ copy(a:items),
-          \ a:build_directory,
-          \ a:scan_directory,
-          \ 0,
-          \ g:vim_cmake_naive_test_popup_menu_response)
+    call s:apply_switch_target_popup_selection(l:state, l:test_result)
     return
   endif
 
-  call popup_menu(l:display_items, l:popup_options)
+  let l:display_items = s:switch_target_popup_display_items(l:state.filtered_items, l:state.current_target)
+  let l:popup_options = s:switch_target_popup_options(a:prompt, l:display_items, l:state.query)
+  let l:popup_id = popup_menu(l:display_items, l:popup_options)
+  if type(l:popup_id) == v:t_number && l:popup_id > 0
+    let s:switch_target_popup_states[l:popup_id] = l:state
+  endif
 endfunction
 
-function! s:switch_target_popup_options(prompt, items, build_directory, scan_directory) abort
-  let l:popup_options = s:switch_preset_popup_options(a:prompt, a:items)
-  let l:popup_options.callback = function(
-        \ 's:on_switch_target_popup_selection',
-        \ [copy(a:items), a:build_directory, a:scan_directory])
+function! s:switch_target_popup_options(prompt, display_items, query) abort
+  let l:popup_options = s:switch_popup_options(
+        \ s:switch_target_popup_title(a:prompt, a:query),
+        \ a:display_items)
+  let l:popup_options.callback = function('s:on_switch_target_popup_selection')
+  let l:popup_options.filter = function('s:on_switch_target_popup_filter')
   return l:popup_options
 endfunction
 
-function! s:on_switch_target_popup_selection(items, build_directory, scan_directory, _popup_id, result) abort
+function! s:switch_target_popup_title(prompt, query) abort
+  let l:query = s:to_string_or_empty(a:query)
+  return empty(l:query) ? a:prompt : a:prompt . ' [' . l:query . ']'
+endfunction
+
+function! s:switch_target_popup_display_items(items, current_target) abort
+  if empty(a:items)
+    return ['1.   no matches']
+  endif
+
+  return s:preset_popup_display_items(a:items, a:current_target)
+endfunction
+
+function! s:filter_switch_target_popup_items(items, query) abort
+  let l:query = tolower(s:to_string_or_empty(a:query))
+  if empty(l:query)
+    return copy(a:items)
+  endif
+
+  let l:filtered_items = []
+  for l:item in a:items
+    if stridx(tolower(l:item), l:query) >= 0
+      call add(l:filtered_items, l:item)
+    endif
+  endfor
+
+  return l:filtered_items
+endfunction
+
+function! s:is_switch_target_popup_text_key(key) abort
+  return strchars(a:key) == 1 && char2nr(a:key) >= 32
+endfunction
+
+function! s:is_switch_target_popup_backspace_key(key) abort
+  return a:key ==# "\<BS>" || a:key ==# "\<C-H>" || a:key ==# "\<Del>" || a:key ==# "\<kDel>"
+endfunction
+
+function! s:on_switch_target_popup_filter(popup_id, key) abort
+  if !has_key(s:switch_target_popup_states, a:popup_id)
+    return popup_filter_menu(a:popup_id, a:key)
+  endif
+
+  let l:state = s:switch_target_popup_states[a:popup_id]
+  if s:is_switch_target_popup_text_key(a:key)
+    let l:state.query .= a:key
+    call s:refresh_switch_target_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_switch_target_popup_backspace_key(a:key)
+    let l:query_length = strchars(l:state.query)
+    if l:query_length > 0
+      let l:state.query = strcharpart(l:state.query, 0, l:query_length - 1)
+      call s:refresh_switch_target_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  if a:key ==# "\<C-U>"
+    if !empty(l:state.query)
+      let l:state.query = ''
+      call s:refresh_switch_target_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  return popup_filter_menu(a:popup_id, a:key)
+endfunction
+
+function! s:refresh_switch_target_popup(popup_id) abort
+  let l:state = get(s:switch_target_popup_states, a:popup_id, {})
+  if empty(l:state)
+    return
+  endif
+
+  let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+  let l:display_items = s:switch_target_popup_display_items(l:state.filtered_items, l:state.current_target)
+  let l:popup_options = s:switch_target_popup_options(l:state.prompt, l:display_items, l:state.query)
+  call popup_settext(a:popup_id, l:display_items)
+  call popup_setoptions(a:popup_id, {
+        \ 'title': l:popup_options.title,
+        \ 'minheight': l:popup_options.minheight,
+        \ 'maxheight': l:popup_options.maxheight
+        \ })
+endfunction
+
+function! s:on_switch_target_popup_selection(popup_id, result) abort
+  if has_key(s:switch_target_popup_states, a:popup_id)
+    let l:state = s:switch_target_popup_states[a:popup_id]
+    call remove(s:switch_target_popup_states, a:popup_id)
+  else
+    let l:state = {}
+  endif
+  call s:apply_switch_target_popup_selection(l:state, a:result)
+endfunction
+
+function! s:apply_switch_target_popup_selection(state, result) abort
+  let l:items = get(a:state, 'filtered_items', [])
   let l:index = type(a:result) == v:t_number
         \ ? a:result
         \ : str2nr(s:to_string_or_empty(a:result))
-  if l:index <= 0 || l:index > len(a:items)
+  if l:index <= 0 || l:index > len(l:items)
     call s:write_info('Target selection canceled.')
     return
   endif
 
-  let l:selected_target = a:items[l:index - 1]
+  let l:selected_target = l:items[l:index - 1]
   try
-    call s:apply_switch_target_selection(l:selected_target, a:build_directory, a:scan_directory)
+    call s:apply_switch_target_selection(
+          \ l:selected_target,
+          \ get(a:state, 'preset_value', ''),
+          \ get(a:state, 'build_directory', ''),
+          \ get(a:state, 'scan_directory', ''))
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
 endfunction
 
-function! s:apply_switch_target_selection(selected_target, build_directory, scan_directory) abort
+function! s:apply_switch_target_selection(selected_target, preset_value, build_directory, scan_directory) abort
   let l:target_directory = s:resolve_selected_target_directory(a:selected_target, a:scan_directory)
   let l:source_file_path = s:ensure_target_compile_commands(
         \ a:selected_target,
         \ l:target_directory,
+        \ a:preset_value,
         \ a:build_directory,
         \ a:scan_directory)
   call s:copy_compile_commands_file(l:source_file_path, a:build_directory)
@@ -725,7 +972,17 @@ function! s:resolve_selected_target_directory(target_name, scan_directory) abort
   return l:directories[0]
 endfunction
 
-function! s:resolve_root_compile_commands_path(build_directory, scan_directory) abort
+function! s:add_root_compile_commands_candidate(candidates, seen, directory) abort
+  let l:candidate = s:normalize_full_path(s:path_join(a:directory, s:default_input_filename))
+  if has_key(a:seen, l:candidate)
+    return
+  endif
+
+  let a:seen[l:candidate] = 1
+  call add(a:candidates, l:candidate)
+endfunction
+
+function! s:resolve_root_compile_commands_path(build_directory, scan_directory, preset_value) abort
   if empty(trim(a:build_directory))
     throw 'Build directory cannot be empty.'
   endif
@@ -733,9 +990,18 @@ function! s:resolve_root_compile_commands_path(build_directory, scan_directory) 
     throw 'Build directory cannot be empty.'
   endif
 
-  let l:candidates = [s:path_join(a:scan_directory, s:default_input_filename)]
-  if !s:path_equals(a:scan_directory, a:build_directory)
-    call add(l:candidates, s:path_join(a:build_directory, s:default_input_filename))
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  let l:candidates = []
+  let l:seen = {}
+  if empty(l:preset_value)
+    call s:add_root_compile_commands_candidate(l:candidates, l:seen, a:scan_directory)
+    if !s:path_equals(a:scan_directory, a:build_directory)
+      call s:add_root_compile_commands_candidate(l:candidates, l:seen, a:build_directory)
+    endif
+  else
+    let l:preset_directory = s:resolve_path(l:preset_value, a:build_directory)
+    call s:add_root_compile_commands_candidate(l:candidates, l:seen, l:preset_directory)
+    call s:add_root_compile_commands_candidate(l:candidates, l:seen, a:build_directory)
   endif
 
   for l:candidate in l:candidates
@@ -748,17 +1014,17 @@ function! s:resolve_root_compile_commands_path(build_directory, scan_directory) 
     throw 'Root ' . s:default_input_filename . ' not found at: ' . l:candidates[0]
   endif
 
-  throw 'Root ' . s:default_input_filename . ' not found at: '
-        \ . l:candidates[0] . ' or ' . l:candidates[1]
+  throw 'Root ' . s:default_input_filename . ' not found at: ' . join(l:candidates, ' or ')
 endfunction
 
-function! s:ensure_target_compile_commands(target_name, target_directory, build_directory, scan_directory) abort
+function! s:ensure_target_compile_commands(target_name, target_directory, preset_value, build_directory, scan_directory) abort
   if empty(trim(a:target_name))
     throw 'Missing required argument: <target>.'
   endif
   if empty(trim(a:target_directory))
     throw 'Target directory cannot be empty.'
   endif
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
   if empty(trim(a:build_directory))
     throw 'Build directory cannot be empty.'
   endif
@@ -773,7 +1039,8 @@ function! s:ensure_target_compile_commands(target_name, target_directory, build_
 
   let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
         \ a:build_directory,
-        \ a:scan_directory)
+        \ a:scan_directory,
+        \ l:preset_value)
   let l:split_build_directory = s:normalize_full_path(fnamemodify(l:root_compile_commands_path, ':h'))
   call s:write_info(
         \ 'Target ' . s:default_input_filename . ' is missing for '
@@ -1303,7 +1570,7 @@ function! s:run_build() abort
     call add(l:argv, l:target_value)
   endif
 
-  call s:run_shell_command(l:argv)
+  call s:run_build_command_with_preview(l:argv)
   call s:write_info('Built project in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
@@ -1414,6 +1681,131 @@ function! s:run_shell_command(argv) abort
   endif
 
   return l:output
+endfunction
+
+function! s:run_build_command_with_preview(argv) abort
+  if empty(a:argv)
+    throw 'Command arguments cannot be empty.'
+  endif
+
+  let l:origin_window_id = win_getid()
+  let l:preview = s:open_build_preview_window()
+  let l:exit_code = 0
+
+  try
+    if s:is_terminal_build_preview_supported()
+      let l:exit_code = s:run_terminal_command_in_current_buffer(a:argv, l:preview.buffer_number)
+    else
+      let l:output = s:run_shell_command(a:argv)
+      silent! %delete _
+      if empty(l:output)
+        call setline(1, [''])
+      else
+        call setline(1, l:output)
+      endif
+    endif
+
+    call s:capture_build_preview_for_tests(l:preview.window_id, bufnr('%'))
+  finally
+    if win_id2win(l:origin_window_id) > 0
+      call win_gotoid(l:origin_window_id)
+    endif
+  endtry
+
+  if l:exit_code != 0
+    throw 'Command failed with exit code ' . l:exit_code . '. See build preview window for details.'
+  endif
+endfunction
+
+function! s:open_build_preview_window() abort
+  execute 'silent keepalt botright pedit ' . fnameescape(s:build_preview_buffer_name)
+  silent wincmd P
+  if !&previewwindow
+    throw 'Failed to open build preview window.'
+  endif
+
+  execute 'silent resize ' . s:build_preview_height
+  setlocal winfixheight
+  return {'window_id': win_getid(), 'buffer_number': bufnr('%')}
+endfunction
+
+function! s:is_terminal_build_preview_supported() abort
+  return exists('*term_start')
+        \ && exists('*term_wait')
+        \ && exists('*term_getstatus')
+        \ && exists('*term_getjob')
+        \ && exists('*job_info')
+endfunction
+
+function! s:run_terminal_command_in_current_buffer(argv, preview_buffer_number) abort
+  let l:job = term_start(copy(a:argv), {'curwin': 1})
+  if type(l:job) != v:t_number || l:job <= 0
+    throw 'Failed to start build command in preview window.'
+  endif
+
+  let l:terminal_buffer_number = bufnr('%')
+  call s:wait_for_terminal_command_to_finish(l:terminal_buffer_number)
+  let l:job_reference = term_getjob(l:terminal_buffer_number)
+
+  try
+    let l:job_info = job_info(l:job_reference)
+  catch
+    throw 'Failed to read build command status.'
+  endtry
+
+  return str2nr(s:to_string_or_empty(get(l:job_info, 'exitval', -1)))
+endfunction
+
+function! s:wait_for_terminal_command_to_finish(preview_buffer_number) abort
+  while stridx(term_getstatus(a:preview_buffer_number), 'running') >= 0
+    call term_wait(a:preview_buffer_number, 100)
+  endwhile
+
+  call term_wait(a:preview_buffer_number, 0)
+endfunction
+
+function! s:capture_build_preview_for_tests(window_id, buffer_number) abort
+  if !exists('g:vim_cmake_naive_test_capture_build_preview')
+        \ || !s:as_condition_bool(g:vim_cmake_naive_test_capture_build_preview)
+    return
+  endif
+
+  let l:window_number = win_id2win(a:window_id)
+  let l:is_preview_window = l:window_number > 0
+        \ ? getwinvar(l:window_number, '&previewwindow', 0)
+        \ : 0
+  let l:window_height = l:window_number > 0 ? winheight(l:window_number) : 0
+  let g:vim_cmake_naive_test_last_build_preview = {
+        \ 'winid': a:window_id,
+        \ 'height': l:window_height,
+        \ 'is_preview': l:is_preview_window,
+        \ 'lines': s:preview_buffer_non_empty_lines(a:buffer_number)
+        \ }
+endfunction
+
+function! s:preview_buffer_non_empty_lines(buffer_number) abort
+  if getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal' && exists('*term_getline')
+    let l:lines = []
+    let l:index = 1
+    while l:index <= 500
+      try
+        let l:line = term_getline(a:buffer_number, l:index)
+      catch
+        break
+      endtry
+
+      if type(l:line) == v:t_string
+        let l:line = substitute(l:line, '\r', '', 'g')
+        if !empty(trim(l:line))
+          call add(l:lines, l:line)
+        endif
+      endif
+      let l:index += 1
+    endwhile
+    return l:lines
+  endif
+
+  return filter(getbufline(a:buffer_number, 1, '$'), '!empty(trim(v:val))')
 endfunction
 
 function! s:cmake_config_path(project_root) abort

@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides eleven commands:
+It provides twelve commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -13,6 +13,7 @@ It provides eleven commands:
 - `:CMakeSwitchTarget`
 - `:CMakeGenerate`
 - `:CMakeBuild`
+- `:CMakeMenu`
 - `:CMakeConfigSetPreset <preset>`
 - `:CMakeResetPreset`
 - `:CMakeResetTarget`
@@ -86,6 +87,19 @@ This command:
 - runs `cmake --build <output>`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
+- opens a preview window at the bottom (about 15 lines) and shows build output while `cmake` is running
+
+Open a popup command menu for CMake commands:
+
+```vim
+:CMakeMenu
+```
+
+This command:
+- shows a popup with all available `CMake*` Ex commands from this plugin
+- uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
+- executes the selected command
+- asks for arguments when a selected command requires them (for example `CMakeConfigSetPreset`)
 
 Switch local CMake preset from `CMakePresets.json`:
 
@@ -118,6 +132,7 @@ This command:
 - uses config `preset` to scan `<output>/<preset>` when that directory exists, otherwise falls back to `<output>`
 - discovers target directories in `**/CMakeFiles/*.dir`
 - prompts through a popup menu for selection (fallback to inputlist) and writes selected target to config key `target`
+- popup supports live search: start typing to filter available targets (`Backspace` removes, `Ctrl-U` clears)
 - popup entries are ordered and prefixed with a number
 - currently selected target is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
