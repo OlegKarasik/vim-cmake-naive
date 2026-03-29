@@ -13,8 +13,7 @@ let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
 let s:switch_target_popup_states = {}
-let s:build_preview_height = 15
-let s:build_preview_buffer_name = '[vim-cmake-naive-build]'
+let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:cmake_menu_prompt = 'Select CMake command'
 let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
@@ -1585,7 +1584,7 @@ function! s:run_build() abort
     call add(l:argv, l:target_value)
   endif
 
-  call s:run_build_command_with_preview(l:argv)
+  call s:run_build_command_in_vertical_terminal(l:argv)
   call s:write_info('Built project in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
@@ -1698,49 +1697,22 @@ function! s:run_shell_command(argv) abort
   return l:output
 endfunction
 
-function! s:run_shell_command_capture_all_output(argv) abort
+function! s:run_build_command_in_vertical_terminal(argv) abort
   if empty(a:argv)
     throw 'Command arguments cannot be empty.'
   endif
 
-  let l:escaped_arguments = map(copy(a:argv), 'shellescape(v:val)')
-  let l:command = join(l:escaped_arguments, ' ') . ' 2>&1'
-  let l:output = systemlist(l:command)
-  return {
-        \ 'output': l:output,
-        \ 'exit_code': v:shell_error
-        \ }
-endfunction
-
-function! s:replace_current_buffer_lines(lines) abort
-  silent! %delete _
-  if empty(a:lines)
-    call setline(1, [''])
-  else
-    call setline(1, copy(a:lines))
-  endif
-  setlocal nomodified
-endfunction
-
-function! s:run_build_command_with_preview(argv) abort
-  if empty(a:argv)
-    throw 'Command arguments cannot be empty.'
+  if !s:is_terminal_build_supported()
+    throw 'Terminal build execution is not supported in this Vim build.'
   endif
 
   let l:origin_window_id = win_getid()
-  let l:preview = s:open_build_preview_window()
+  let l:terminal = s:open_build_terminal_window()
   let l:exit_code = 0
 
   try
-    if s:is_terminal_build_preview_supported()
-      let l:exit_code = s:run_terminal_command_in_current_buffer(a:argv, l:preview.buffer_number)
-    else
-      let l:result = s:run_shell_command_capture_all_output(a:argv)
-      call s:replace_current_buffer_lines(l:result.output)
-      let l:exit_code = l:result.exit_code
-    endif
-
-    call s:capture_build_preview_for_tests(l:preview.window_id, bufnr('%'))
+    let l:exit_code = s:run_terminal_command_in_current_buffer(a:argv)
+    call s:capture_build_terminal_for_tests(l:terminal.window_id, bufnr('%'))
   finally
     if win_id2win(l:origin_window_id) > 0
       call win_gotoid(l:origin_window_id)
@@ -1748,28 +1720,17 @@ function! s:run_build_command_with_preview(argv) abort
   endtry
 
   if l:exit_code != 0
-    throw 'Command failed with exit code ' . l:exit_code . '. See build preview window for details.'
+    throw 'Command failed with exit code ' . l:exit_code . '. See build terminal window for details.'
   endif
 endfunction
 
-function! s:open_build_preview_window() abort
-  execute 'silent keepalt botright pedit ' . fnameescape(s:build_preview_buffer_name)
-  silent wincmd P
-  if !&previewwindow
-    throw 'Failed to open build preview window.'
-  endif
-
-  execute 'silent resize ' . s:build_preview_height
-  setlocal winfixheight
+function! s:open_build_terminal_window() abort
+  execute 'silent keepalt vertical botright new'
+  execute 'silent file ' . fnameescape(s:build_terminal_buffer_name)
   return {'window_id': win_getid(), 'buffer_number': bufnr('%')}
 endfunction
 
-function! s:is_terminal_build_preview_supported() abort
-  if exists('g:vim_cmake_naive_test_force_non_terminal_build_preview')
-        \ && s:as_condition_bool(g:vim_cmake_naive_test_force_non_terminal_build_preview)
-    return 0
-  endif
-
+function! s:is_terminal_build_supported() abort
   return exists('*term_start')
         \ && exists('*term_wait')
         \ && exists('*term_getstatus')
@@ -1777,10 +1738,10 @@ function! s:is_terminal_build_preview_supported() abort
         \ && exists('*job_info')
 endfunction
 
-function! s:run_terminal_command_in_current_buffer(argv, preview_buffer_number) abort
+function! s:run_terminal_command_in_current_buffer(argv) abort
   let l:job = term_start(copy(a:argv), {'curwin': 1})
   if type(l:job) != v:t_number || l:job <= 0
-    throw 'Failed to start build command in preview window.'
+    throw 'Failed to start build command in terminal window.'
   endif
 
   let l:terminal_buffer_number = bufnr('%')
@@ -1801,29 +1762,32 @@ function! s:wait_for_terminal_command_to_finish(preview_buffer_number) abort
     call term_wait(a:preview_buffer_number, 100)
   endwhile
 
-  call term_wait(a:preview_buffer_number, 0)
+  call term_wait(a:preview_buffer_number, 100)
 endfunction
 
-function! s:capture_build_preview_for_tests(window_id, buffer_number) abort
-  if !exists('g:vim_cmake_naive_test_capture_build_preview')
-        \ || !s:as_condition_bool(g:vim_cmake_naive_test_capture_build_preview)
+function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
+  if !exists('g:vim_cmake_naive_test_capture_build_terminal')
+        \ || !s:as_condition_bool(g:vim_cmake_naive_test_capture_build_terminal)
     return
   endif
 
   let l:window_number = win_id2win(a:window_id)
-  let l:is_preview_window = l:window_number > 0
-        \ ? getwinvar(l:window_number, '&previewwindow', 0)
-        \ : 0
-  let l:window_height = l:window_number > 0 ? winheight(l:window_number) : 0
-  let g:vim_cmake_naive_test_last_build_preview = {
+  let l:window_width = l:window_number > 0 ? winwidth(l:window_number) : 0
+  let l:current_window_number = winnr()
+  let l:is_vertical_split = winnr('h') != l:current_window_number
+        \ || winnr('l') != l:current_window_number
+  let l:is_terminal = getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal'
+  let g:vim_cmake_naive_test_last_build_terminal = {
         \ 'winid': a:window_id,
-        \ 'height': l:window_height,
-        \ 'is_preview': l:is_preview_window,
-        \ 'lines': s:preview_buffer_non_empty_lines(a:buffer_number)
+        \ 'width': l:window_width,
+        \ 'window_count': winnr('$'),
+        \ 'is_vertical_split': l:is_vertical_split,
+        \ 'is_terminal': l:is_terminal,
+        \ 'lines': s:build_terminal_non_empty_lines(a:buffer_number)
         \ }
 endfunction
 
-function! s:preview_buffer_non_empty_lines(buffer_number) abort
+function! s:build_terminal_non_empty_lines(buffer_number) abort
   if getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal' && exists('*term_getline')
     let l:lines = []
     let l:index = 1

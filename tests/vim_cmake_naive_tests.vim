@@ -896,7 +896,7 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
   endtry
 endfunction
 
-function! s:test_cmake_build_opens_preview_window_with_command_output() abort
+function! s:test_cmake_build_opens_vertical_terminal_with_command_output() abort
   if !has('unix')
     return
   endif
@@ -904,8 +904,8 @@ function! s:test_cmake_build_opens_preview_window_with_command_output() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
-  let l:initial_capture_preview = get(g:, 'vim_cmake_naive_test_capture_build_preview', v:null)
-  let l:initial_last_preview = get(g:, 'vim_cmake_naive_test_last_build_preview', v:null)
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
 
   try
     let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-preview.txt')
@@ -923,16 +923,18 @@ function! s:test_cmake_build_opens_preview_window_with_command_output() abort
     let $PATH = l:bin_dir . ':' . l:initial_path
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    let g:vim_cmake_naive_test_capture_build_preview = 1
-    unlet! g:vim_cmake_naive_test_last_build_preview
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#build()
 
-    let l:preview = get(g:, 'vim_cmake_naive_test_last_build_preview', {})
-    call assert_equal(1, get(l:preview, 'is_preview', 0))
-    call assert_true(get(l:preview, 'height', 0) >= 14)
-    let l:preview_text = join(get(l:preview, 'lines', []), "\n")
-    call assert_true(stridx(l:preview_text, 'preview-build-line-1') >= 0)
-    call assert_true(stridx(l:preview_text, 'preview-build-line-2') >= 0)
+    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
+    call assert_true(get(l:terminal, 'window_count', 0) >= 2)
+    call assert_true(get(l:terminal, 'width', 0) > 0)
+    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
+    call assert_true(stridx(l:terminal_text, 'preview-build-line-1') >= 0)
+    call assert_true(stridx(l:terminal_text, 'preview-build-line-2') >= 0)
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_equal(
@@ -940,22 +942,22 @@ function! s:test_cmake_build_opens_preview_window_with_command_output() abort
           \ s:read_non_empty_lines(l:args_path))
   finally
     let $PATH = l:initial_path
-    if l:initial_capture_preview is v:null
-      unlet! g:vim_cmake_naive_test_capture_build_preview
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
     else
-      let g:vim_cmake_naive_test_capture_build_preview = l:initial_capture_preview
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
     endif
-    if l:initial_last_preview is v:null
-      unlet! g:vim_cmake_naive_test_last_build_preview
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
     else
-      let g:vim_cmake_naive_test_last_build_preview = l:initial_last_preview
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
 endfunction
 
-function! s:test_cmake_build_opens_preview_window_with_stdout_and_stderr_output() abort
+function! s:test_cmake_build_opens_vertical_terminal_with_stdout_and_stderr_output() abort
   if !has('unix')
     return
   endif
@@ -963,9 +965,8 @@ function! s:test_cmake_build_opens_preview_window_with_stdout_and_stderr_output(
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
-  let l:initial_capture_preview = get(g:, 'vim_cmake_naive_test_capture_build_preview', v:null)
-  let l:initial_last_preview = get(g:, 'vim_cmake_naive_test_last_build_preview', v:null)
-  let l:initial_force_non_terminal = get(g:, 'vim_cmake_naive_test_force_non_terminal_build_preview', v:null)
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
 
   try
     let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-preview-all-output.txt')
@@ -983,16 +984,16 @@ function! s:test_cmake_build_opens_preview_window_with_stdout_and_stderr_output(
     let $PATH = l:bin_dir . ':' . l:initial_path
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    let g:vim_cmake_naive_test_capture_build_preview = 1
-    let g:vim_cmake_naive_test_force_non_terminal_build_preview = 1
-    unlet! g:vim_cmake_naive_test_last_build_preview
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#build()
 
-    let l:preview = get(g:, 'vim_cmake_naive_test_last_build_preview', {})
-    call assert_equal(1, get(l:preview, 'is_preview', 0))
-    let l:preview_text = join(get(l:preview, 'lines', []), "\n")
-    call assert_true(stridx(l:preview_text, 'preview-stdout-line') >= 0)
-    call assert_true(stridx(l:preview_text, 'preview-stderr-line') >= 0)
+    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
+    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
+    call assert_true(stridx(l:terminal_text, 'preview-stdout-line') >= 0)
+    call assert_true(stridx(l:terminal_text, 'preview-stderr-line') >= 0)
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_equal(
@@ -1000,20 +1001,15 @@ function! s:test_cmake_build_opens_preview_window_with_stdout_and_stderr_output(
           \ s:read_non_empty_lines(l:args_path))
   finally
     let $PATH = l:initial_path
-    if l:initial_capture_preview is v:null
-      unlet! g:vim_cmake_naive_test_capture_build_preview
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
     else
-      let g:vim_cmake_naive_test_capture_build_preview = l:initial_capture_preview
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
     endif
-    if l:initial_last_preview is v:null
-      unlet! g:vim_cmake_naive_test_last_build_preview
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
     else
-      let g:vim_cmake_naive_test_last_build_preview = l:initial_last_preview
-    endif
-    if l:initial_force_non_terminal is v:null
-      unlet! g:vim_cmake_naive_test_force_non_terminal_build_preview
-    else
-      let g:vim_cmake_naive_test_force_non_terminal_build_preview = l:initial_force_non_terminal
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -1124,9 +1120,8 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
   let l:initial_menu_command_args = get(g:, 'vim_cmake_naive_test_menu_command_args', v:null)
-  let l:initial_capture_preview = get(g:, 'vim_cmake_naive_test_capture_build_preview', v:null)
-  let l:initial_last_preview = get(g:, 'vim_cmake_naive_test_last_build_preview', v:null)
-  let l:initial_force_non_terminal = get(g:, 'vim_cmake_naive_test_force_non_terminal_build_preview', v:null)
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
   let l:initial_path = $PATH
 
   try
@@ -1147,13 +1142,12 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     let g:vim_cmake_naive_test_use_popup_menu = 1
     let g:vim_cmake_naive_test_popup_menu_response = 2
     let g:vim_cmake_naive_test_menu_command_args = {}
-    let g:vim_cmake_naive_test_capture_build_preview = 1
-    let g:vim_cmake_naive_test_force_non_terminal_build_preview = 1
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
     unlet! g:vim_cmake_naive_test_menu_response
     unlet! g:vim_cmake_naive_test_inputlist_response
     unlet! g:vim_cmake_naive_test_last_menu_popup_items
     unlet! g:vim_cmake_naive_test_last_menu_popup_options
-    unlet! g:vim_cmake_naive_test_last_build_preview
+    unlet! g:vim_cmake_naive_test_last_build_terminal
     execute 'silent CMakeMenu'
 
     call assert_equal(
@@ -1169,9 +1163,11 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_menu_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderhighlight', []))
-    let l:preview = get(g:, 'vim_cmake_naive_test_last_build_preview', {})
-    let l:preview_text = join(get(l:preview, 'lines', []), "\n")
-    call assert_true(stridx(l:preview_text, 'compact-menu-build-output') >= 0)
+    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
+    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
+    call assert_true(stridx(l:terminal_text, 'compact-menu-build-output') >= 0)
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(filereadable(l:args_path))
     let l:args_lines = filereadable(l:args_path)
@@ -1217,20 +1213,15 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     else
       let g:vim_cmake_naive_test_menu_command_args = l:initial_menu_command_args
     endif
-    if l:initial_capture_preview is v:null
-      unlet! g:vim_cmake_naive_test_capture_build_preview
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
     else
-      let g:vim_cmake_naive_test_capture_build_preview = l:initial_capture_preview
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
     endif
-    if l:initial_last_preview is v:null
-      unlet! g:vim_cmake_naive_test_last_build_preview
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
     else
-      let g:vim_cmake_naive_test_last_build_preview = l:initial_last_preview
-    endif
-    if l:initial_force_non_terminal is v:null
-      unlet! g:vim_cmake_naive_test_force_non_terminal_build_preview
-    else
-      let g:vim_cmake_naive_test_force_non_terminal_build_preview = l:initial_force_non_terminal
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -2165,8 +2156,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_generate_errors_when_no_cmakelists_found()
   call s:test_cmake_build_creates_default_config_and_invokes_cmake_build()
   call s:test_cmake_build_uses_existing_config_preset_and_target()
-  call s:test_cmake_build_opens_preview_window_with_command_output()
-  call s:test_cmake_build_opens_preview_window_with_stdout_and_stderr_output()
+  call s:test_cmake_build_opens_vertical_terminal_with_command_output()
+  call s:test_cmake_build_opens_vertical_terminal_with_stdout_and_stderr_output()
   call s:test_cmake_build_errors_when_no_cmakelists_found()
   call s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection()
   call s:test_cmake_menu_popup_lists_commands_and_executes_selection()
