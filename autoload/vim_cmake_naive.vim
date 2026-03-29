@@ -1585,7 +1585,7 @@ function! s:run_build() abort
   endif
 
   call s:run_build_command_in_vertical_terminal(l:argv)
-  call s:write_info('Built project in ' . s:relative_path(l:build_directory, l:project_root))
+  call s:write_info('Started build in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
 function! s:resolve_cmake_project_root(start_directory) abort
@@ -1708,20 +1708,14 @@ function! s:run_build_command_in_vertical_terminal(argv) abort
 
   let l:origin_window_id = win_getid()
   let l:terminal = s:open_build_terminal_window()
-  let l:exit_code = 0
 
   try
-    let l:exit_code = s:run_terminal_command_in_current_buffer(a:argv)
-    call s:capture_build_terminal_for_tests(l:terminal.window_id, bufnr('%'))
+    call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id)
   finally
     if win_id2win(l:origin_window_id) > 0
       call win_gotoid(l:origin_window_id)
     endif
   endtry
-
-  if l:exit_code != 0
-    throw 'Command failed with exit code ' . l:exit_code . '. See build terminal window for details.'
-  endif
 endfunction
 
 function! s:open_build_terminal_window() abort
@@ -1732,42 +1726,78 @@ endfunction
 
 function! s:is_terminal_build_supported() abort
   return exists('*term_start')
-        \ && exists('*term_wait')
-        \ && exists('*term_getstatus')
-        \ && exists('*term_getjob')
         \ && exists('*job_info')
 endfunction
 
-function! s:run_terminal_command_in_current_buffer(argv) abort
-  let l:job = term_start(copy(a:argv), {'curwin': 1})
+function! s:start_terminal_command_in_current_buffer(argv, window_id) abort
+  let l:term_options = {'curwin': 1}
+  if !s:should_capture_build_terminal_for_tests()
+    let l:term_options.exit_cb = function('s:on_build_terminal_command_exit', [a:window_id])
+  endif
+
+  let l:job = term_start(copy(a:argv), l:term_options)
   if type(l:job) != v:t_number || l:job <= 0
     throw 'Failed to start build command in terminal window.'
   endif
 
   let l:terminal_buffer_number = bufnr('%')
-  call s:wait_for_terminal_command_to_finish(l:terminal_buffer_number)
-  let l:job_reference = term_getjob(l:terminal_buffer_number)
-
-  try
-    let l:job_info = job_info(l:job_reference)
-  catch
-    throw 'Failed to read build command status.'
-  endtry
-
-  return str2nr(s:to_string_or_empty(get(l:job_info, 'exitval', -1)))
+  call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+  if s:should_capture_build_terminal_for_tests()
+    let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
+    call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+    if l:exit_code != 0
+      call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
+    endif
+  endif
 endfunction
 
-function! s:wait_for_terminal_command_to_finish(preview_buffer_number) abort
-  while stridx(term_getstatus(a:preview_buffer_number), 'running') >= 0
-    call term_wait(a:preview_buffer_number, 100)
-  endwhile
+function! s:on_build_terminal_command_exit(window_id, job, status) abort
+  call s:capture_build_terminal_for_tests(a:window_id, bufnr('%'))
 
-  call term_wait(a:preview_buffer_number, 100)
+  let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
+  if l:exit_code != 0
+    call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
+  endif
+endfunction
+
+function! s:terminal_job_exit_code(job, status) abort
+  if type(a:status) == v:t_number
+    return a:status
+  endif
+
+  let l:status_text = trim(s:to_string_or_empty(a:status))
+  if l:status_text =~# '^-\\?\d\+$'
+    return str2nr(l:status_text)
+  endif
+
+  try
+    let l:job_info = job_info(a:job)
+  catch
+    return 0
+  endtry
+
+  if type(l:job_info) == v:t_dict && has_key(l:job_info, 'exitval')
+    return str2nr(s:to_string_or_empty(get(l:job_info, 'exitval', 0)))
+  endif
+
+  return 0
+endfunction
+
+function! s:wait_for_terminal_command_and_read_exit_code(buffer_number) abort
+  if !exists('*term_wait') || !exists('*term_getstatus') || !exists('*term_getjob')
+    return 0
+  endif
+
+  while stridx(term_getstatus(a:buffer_number), 'running') >= 0
+    call term_wait(a:buffer_number, 10)
+  endwhile
+  call term_wait(a:buffer_number, 10)
+
+  return s:terminal_job_exit_code(term_getjob(a:buffer_number), 0)
 endfunction
 
 function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
-  if !exists('g:vim_cmake_naive_test_capture_build_terminal')
-        \ || !s:as_condition_bool(g:vim_cmake_naive_test_capture_build_terminal)
+  if !s:should_capture_build_terminal_for_tests()
     return
   endif
 
@@ -1785,6 +1815,11 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
         \ 'is_terminal': l:is_terminal,
         \ 'lines': s:build_terminal_non_empty_lines(a:buffer_number)
         \ }
+endfunction
+
+function! s:should_capture_build_terminal_for_tests() abort
+  return exists('g:vim_cmake_naive_test_capture_build_terminal')
+        \ && s:as_condition_bool(g:vim_cmake_naive_test_capture_build_terminal)
 endfunction
 
 function! s:build_terminal_non_empty_lines(buffer_number) abort

@@ -88,6 +88,31 @@ function! s:read_non_empty_lines(path) abort
   return filter(readfile(a:path, 'b'), '!empty(v:val)')
 endfunction
 
+function! s:wait_for_file(path, timeout_ms) abort
+  let l:elapsed = 0
+  while !filereadable(a:path) && l:elapsed < a:timeout_ms
+    sleep 10m
+    let l:elapsed += 10
+  endwhile
+
+  return filereadable(a:path)
+endfunction
+
+function! s:wait_for_captured_build_terminal_output(fragment, timeout_ms) abort
+  let l:elapsed = 0
+  while l:elapsed < a:timeout_ms
+    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
+    if stridx(l:terminal_text, a:fragment) >= 0
+      return l:terminal
+    endif
+    sleep 10m
+    let l:elapsed += 10
+  endwhile
+
+  return get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+endfunction
+
 function! s:unique_id(prefix) abort
   return a:prefix . substitute(reltimestr(reltime()), '[^0-9A-Za-z]', '', 'g')
 endfunction
@@ -844,6 +869,7 @@ function! s:test_cmake_build_creates_default_config_and_invokes_cmake_build() ab
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'build')
     call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call assert_equal(
           \ ['--build', l:expected_build_dir],
           \ s:read_non_empty_lines(l:args_path))
@@ -879,6 +905,7 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
     execute 'silent CMakeBuild'
 
     let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call assert_equal(
           \ [
           \   '--build',
@@ -927,7 +954,7 @@ function! s:test_cmake_build_opens_vertical_terminal_with_command_output() abort
     unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#build()
 
-    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    let l:terminal = s:wait_for_captured_build_terminal_output('preview-build-line-2', 1000)
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
     call assert_true(get(l:terminal, 'window_count', 0) >= 2)
@@ -937,6 +964,7 @@ function! s:test_cmake_build_opens_vertical_terminal_with_command_output() abort
     call assert_true(stridx(l:terminal_text, 'preview-build-line-2') >= 0)
 
     let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call assert_equal(
           \ ['--build', s:path_join(l:expected_root, 'build')],
           \ s:read_non_empty_lines(l:args_path))
@@ -988,7 +1016,7 @@ function! s:test_cmake_build_opens_vertical_terminal_with_stdout_and_stderr_outp
     unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#build()
 
-    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    let l:terminal = s:wait_for_captured_build_terminal_output('preview-stderr-line', 1000)
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
     let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
@@ -996,6 +1024,7 @@ function! s:test_cmake_build_opens_vertical_terminal_with_stdout_and_stderr_outp
     call assert_true(stridx(l:terminal_text, 'preview-stderr-line') >= 0)
 
     let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call assert_equal(
           \ ['--build', s:path_join(l:expected_root, 'build')],
           \ s:read_non_empty_lines(l:args_path))
@@ -1163,13 +1192,11 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_menu_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderhighlight', []))
-    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    let l:terminal = s:wait_for_captured_build_terminal_output('compact-menu-build-output', 1000)
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
-    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
-    call assert_true(stridx(l:terminal_text, 'compact-menu-build-output') >= 0)
     let l:expected_root = s:normalized_path(l:fixture.root)
-    call assert_true(filereadable(l:args_path))
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     let l:args_lines = filereadable(l:args_path)
           \ ? s:read_non_empty_lines(l:args_path)
           \ : []
