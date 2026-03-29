@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides twelve commands:
+It provides thirteen commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -14,6 +14,7 @@ It provides twelve commands:
 - `:CMakeGenerate`
 - `:CMakeBuild`
 - `:CMakeMenu`
+- `:CMakeMenuFull`
 - `:CMakeConfigSetPreset <preset>`
 - `:CMakeResetPreset`
 - `:CMakeResetTarget`
@@ -89,10 +90,21 @@ This command:
 - adds `--target <target>` when config `target` is non-empty
 - opens a preview window at the bottom (about 15 lines) and shows build output while `cmake` is running
 
-Open a popup command menu for CMake commands:
+Open a compact popup command menu for common CMake commands:
 
 ```vim
 :CMakeMenu
+```
+
+This command:
+- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeSwitchPreset`, `CMakeSwitchTarget`
+- uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
+- executes the selected command
+
+Open a full popup command menu for all plugin CMake commands:
+
+```vim
+:CMakeMenuFull
 ```
 
 This command:

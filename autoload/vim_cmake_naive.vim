@@ -16,7 +16,7 @@ let s:switch_target_popup_states = {}
 let s:build_preview_height = 15
 let s:build_preview_buffer_name = '[vim-cmake-naive-build]'
 let s:cmake_menu_prompt = 'Select CMake command'
-let s:cmake_menu_command_specs = [
+let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
       \ {'name': 'CMakeConfigDefault', 'needs_args': 0},
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
@@ -24,11 +24,18 @@ let s:cmake_menu_command_specs = [
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
+      \ {'name': 'CMakeMenuFull', 'needs_args': 0},
       \ {'name': 'CMakeResetPreset', 'needs_args': 0},
       \ {'name': 'CMakeResetTarget', 'needs_args': 0},
       \ {'name': 'CMakeConfigSetPreset', 'needs_args': 1},
       \ {'name': 'CMakeConfigSetBuild', 'needs_args': 1},
       \ {'name': 'CMakeConfigSetOutput', 'needs_args': 1}
+      \ ]
+let s:cmake_menu_compact_command_specs = [
+      \ {'name': 'CMakeGenerate', 'needs_args': 0},
+      \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchTarget', 'needs_args': 0}
       \ ]
 
 function! vim_cmake_naive#split(...) abort
@@ -139,7 +146,15 @@ endfunction
 
 function! vim_cmake_naive#menu() abort
   try
-    call s:run_menu()
+    call s:run_menu_with_specs(s:cmake_menu_compact_command_specs)
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#menu_full() abort
+  try
+    call s:run_menu_with_specs(s:cmake_menu_full_command_specs)
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -439,8 +454,8 @@ function! s:run_switch_preset() abort
   call s:run_set_config_preset(l:selected_preset)
 endfunction
 
-function! s:run_menu() abort
-  let l:commands = s:menu_commands()
+function! s:run_menu_with_specs(command_specs) abort
+  let l:commands = s:menu_commands(a:command_specs)
   if empty(l:commands)
     throw 'No selectable CMake commands found.'
   endif
@@ -459,9 +474,9 @@ function! s:run_menu() abort
   call s:execute_menu_command(l:selected_command)
 endfunction
 
-function! s:menu_commands() abort
+function! s:menu_commands(command_specs) abort
   let l:commands = []
-  for l:command_spec in s:cmake_menu_command_specs
+  for l:command_spec in a:command_specs
     let l:command_name = s:to_string_or_empty(get(l:command_spec, 'name', ''))
     if exists(':' . l:command_name) == 2
       call add(l:commands, l:command_name)
@@ -517,7 +532,7 @@ function! s:execute_menu_command(command_name) abort
 endfunction
 
 function! s:menu_command_spec(command_name) abort
-  for l:command_spec in s:cmake_menu_command_specs
+  for l:command_spec in s:cmake_menu_full_command_specs
     if s:to_string_or_empty(get(l:command_spec, 'name', '')) ==# a:command_name
       return l:command_spec
     endif
@@ -1683,6 +1698,30 @@ function! s:run_shell_command(argv) abort
   return l:output
 endfunction
 
+function! s:run_shell_command_capture_all_output(argv) abort
+  if empty(a:argv)
+    throw 'Command arguments cannot be empty.'
+  endif
+
+  let l:escaped_arguments = map(copy(a:argv), 'shellescape(v:val)')
+  let l:command = join(l:escaped_arguments, ' ') . ' 2>&1'
+  let l:output = systemlist(l:command)
+  return {
+        \ 'output': l:output,
+        \ 'exit_code': v:shell_error
+        \ }
+endfunction
+
+function! s:replace_current_buffer_lines(lines) abort
+  silent! %delete _
+  if empty(a:lines)
+    call setline(1, [''])
+  else
+    call setline(1, copy(a:lines))
+  endif
+  setlocal nomodified
+endfunction
+
 function! s:run_build_command_with_preview(argv) abort
   if empty(a:argv)
     throw 'Command arguments cannot be empty.'
@@ -1696,13 +1735,9 @@ function! s:run_build_command_with_preview(argv) abort
     if s:is_terminal_build_preview_supported()
       let l:exit_code = s:run_terminal_command_in_current_buffer(a:argv, l:preview.buffer_number)
     else
-      let l:output = s:run_shell_command(a:argv)
-      silent! %delete _
-      if empty(l:output)
-        call setline(1, [''])
-      else
-        call setline(1, l:output)
-      endif
+      let l:result = s:run_shell_command_capture_all_output(a:argv)
+      call s:replace_current_buffer_lines(l:result.output)
+      let l:exit_code = l:result.exit_code
     endif
 
     call s:capture_build_preview_for_tests(l:preview.window_id, bufnr('%'))
@@ -1730,6 +1765,11 @@ function! s:open_build_preview_window() abort
 endfunction
 
 function! s:is_terminal_build_preview_supported() abort
+  if exists('g:vim_cmake_naive_test_force_non_terminal_build_preview')
+        \ && s:as_condition_bool(g:vim_cmake_naive_test_force_non_terminal_build_preview)
+    return 0
+  endif
+
   return exists('*term_start')
         \ && exists('*term_wait')
         \ && exists('*term_getstatus')
