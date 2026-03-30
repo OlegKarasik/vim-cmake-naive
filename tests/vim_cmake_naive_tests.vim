@@ -777,9 +777,11 @@ function! s:test_cmake_generate_creates_default_config_and_invokes_cmake() abort
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'build')
     call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call assert_equal(
-          \ ['-S', l:expected_root, '-B', l:expected_build_dir, '-DCMAKE_BUILD_TYPE=Debug'],
+          \ ['-S', l:expected_root, '-B', l:expected_build_dir, '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ s:read_non_empty_lines(l:args_path))
+    call assert_true(isdirectory(l:expected_build_dir), 'Expected output directory to be created.')
   finally
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -810,19 +812,85 @@ function! s:test_cmake_generate_uses_existing_config_values() abort
     execute 'silent CMakeGenerate'
 
     let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_build_dir = s:path_join(l:expected_root, 'out/build-dir')
+    let l:expected_preset_build_dir = s:path_join(l:expected_build_dir, 'dev')
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call assert_equal(
           \ [
           \   '-S',
           \   l:expected_root,
           \   '-B',
-          \   s:path_join(l:expected_root, 'out/build-dir'),
+          \   l:expected_build_dir,
+          \   '--fresh',
           \   '-DCMAKE_BUILD_TYPE=Release',
           \   '--preset',
           \   'dev'
           \ ],
           \ s:read_non_empty_lines(l:args_path))
+    call assert_true(isdirectory(l:expected_build_dir), 'Expected output directory to be created.')
+    call assert_true(isdirectory(l:expected_preset_build_dir), 'Expected output/preset directory to be created.')
   finally
     let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_generate_opens_vertical_terminal_with_command_output() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-args-preview.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'echo "preview-generate-line-1"',
+          \ 'echo "preview-generate-line-2"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#generate()
+
+    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_equal(1, get(l:terminal, 'is_vertical_split', 0))
+    call assert_true(get(l:terminal, 'window_count', 0) >= 2)
+    call assert_true(get(l:terminal, 'width', 0) > 0)
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_build_dir = s:path_join(l:expected_root, 'build')
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    call assert_equal(
+          \ ['-S', l:expected_root, '-B', l:expected_build_dir, '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
+          \ s:read_non_empty_lines(l:args_path))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -2180,6 +2248,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_config_default_errors_when_no_cmakelists_found()
   call s:test_cmake_generate_creates_default_config_and_invokes_cmake()
   call s:test_cmake_generate_uses_existing_config_values()
+  call s:test_cmake_generate_opens_vertical_terminal_with_command_output()
   call s:test_cmake_generate_errors_when_no_cmakelists_found()
   call s:test_cmake_build_creates_default_config_and_invokes_cmake_build()
   call s:test_cmake_build_uses_existing_config_preset_and_target()

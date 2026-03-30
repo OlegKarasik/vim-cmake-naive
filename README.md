@@ -70,10 +70,15 @@ This command:
 - finds nearest `CMakeLists.txt` from current directory upward
 - finds nearest existing `.vim/.cmake/.config.json`, or creates default config
   at the discovered CMake project root when none exists
+- creates `<output>` directory when missing
+- when `preset` is non-empty, also creates `<output>/<preset>` when missing
 - runs `cmake` with config values:
   - `output` -> `-B <build-dir>`
+  - adds `--fresh` to force clean cache regeneration
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
+- opens a vertical split terminal and starts generate there asynchronously
+- returns immediately; completion/failures are reported in that terminal/messages
 
 Build project with CMake from local config:
 

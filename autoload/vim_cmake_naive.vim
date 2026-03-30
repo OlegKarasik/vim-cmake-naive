@@ -1540,12 +1540,19 @@ function! s:run_generate() abort
 
   let l:preset_value = s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, ''))
   let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
+  call mkdir(l:build_directory, 'p')
+  if !empty(l:preset_output_directory)
+    call mkdir(l:preset_output_directory, 'p')
+  endif
+
   let l:argv = [
         \ 'cmake',
         \ '-S',
         \ l:project_root,
         \ '-B',
         \ l:build_directory,
+        \ '--fresh',
         \ '-DCMAKE_BUILD_TYPE=' . l:build_value
         \ ]
 
@@ -1554,8 +1561,8 @@ function! s:run_generate() abort
     call add(l:argv, l:preset_value)
   endif
 
-  call s:run_shell_command(l:argv)
-  call s:write_info('Generated build system in ' . s:relative_path(l:build_directory, l:project_root))
+  call s:run_build_command_in_vertical_terminal(l:argv)
+  call s:write_info('Started generate in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
 function! s:run_build() abort
@@ -1586,6 +1593,15 @@ function! s:run_build() abort
 
   call s:run_build_command_in_vertical_terminal(l:argv)
   call s:write_info('Started build in ' . s:relative_path(l:build_directory, l:project_root))
+endfunction
+
+function! s:generate_preset_output_directory(build_directory, preset_value) abort
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  if empty(l:preset_value)
+    return ''
+  endif
+
+  return s:resolve_path(l:preset_value, a:build_directory)
 endfunction
 
 function! s:resolve_cmake_project_root(start_directory) abort
