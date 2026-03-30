@@ -906,7 +906,7 @@ function! s:test_cmake_generate_uses_existing_config_values() abort
           \   '-S',
           \   l:expected_root,
           \   '-B',
-          \   l:expected_build_dir,
+          \   l:expected_preset_build_dir,
           \   '--fresh',
           \   '-DCMAKE_BUILD_TYPE=Release',
           \   '--preset',

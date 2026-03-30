@@ -1679,9 +1679,10 @@ function! s:run_generate() abort
     let l:build_value = s:cmake_config_default_build
   endif
 
-  let l:preset_value = s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, ''))
+  let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   let l:build_directory = s:resolve_path(l:output_value, l:project_root)
   let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
+  let l:generation_directory = empty(l:preset_value) ? l:build_directory : l:preset_output_directory
   call mkdir(l:build_directory, 'p')
   if !empty(l:preset_output_directory)
     call mkdir(l:preset_output_directory, 'p')
@@ -1692,18 +1693,18 @@ function! s:run_generate() abort
         \ '-S',
         \ l:project_root,
         \ '-B',
-        \ l:build_directory,
+        \ l:generation_directory,
         \ '--fresh',
         \ '-DCMAKE_BUILD_TYPE=' . l:build_value
         \ ]
 
-  if !empty(trim(l:preset_value))
+  if !empty(l:preset_value)
     call add(l:argv, '--preset')
     call add(l:argv, l:preset_value)
   endif
 
   call s:run_build_command_in_vertical_terminal(l:argv, {'reuse_previous_build_window': 1})
-  call s:write_info('Started generate in ' . s:relative_path(l:build_directory, l:project_root))
+  call s:write_info('Started generate in ' . s:relative_path(l:generation_directory, l:project_root))
 endfunction
 
 function! s:run_build() abort

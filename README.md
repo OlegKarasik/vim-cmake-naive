@@ -74,7 +74,8 @@ This command:
 - creates `<output>` directory when missing
 - when `preset` is non-empty, also creates `<output>/<preset>` when missing
 - runs `cmake` with config values:
-  - `output` -> `-B <build-dir>`
+  - `output` -> `-B <output>` when preset is empty
+  - `output` + `preset` -> `-B <output>/<preset>` when preset is non-empty
   - adds `--fresh` to force clean cache regeneration
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
