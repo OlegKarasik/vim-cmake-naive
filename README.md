@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides thirteen commands:
+It provides fourteen commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -13,6 +13,7 @@ It provides thirteen commands:
 - `:CMakeSwitchTarget`
 - `:CMakeGenerate`
 - `:CMakeBuild`
+- `:CMakeInfo`
 - `:CMakeMenu`
 - `:CMakeMenuFull`
 - `:CMakeConfigSetPreset <preset>`
@@ -78,6 +79,7 @@ This command:
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
 - opens a vertical split terminal and starts generate there asynchronously
+- reuses previously opened visible build/generate output window when possible; otherwise recreates it
 - returns immediately; completion/failures are reported in that terminal/messages
 
 Build project with CMake from local config:
@@ -94,8 +96,26 @@ This command:
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
 - opens a vertical split terminal and starts the build there asynchronously
+- sets terminal status name while running to:
+  - `cmake build --preset=<preset> --target=<target>` when preset and target are set
+  - `cmake build --target=all` when target is empty
+  - omits `--preset=...` when preset is empty
+- renames terminal status name on completion to `Success` or `Failure (<code>)`
 - reuses previously opened visible build output window when possible; otherwise recreates it
 - returns immediately; build completion and failures are reported in that terminal/messages
+
+Show local CMake configuration in popup table:
+
+```vim
+:CMakeInfo
+```
+
+This command:
+- reads nearest existing `.vim/.cmake/.config.json`
+- shows popup with key/value table (`key | value`)
+- uses standard popup style (smooth single-line border, `Pmenu` colors)
+- if config is missing, shows:
+  `No configuration, please use CMakeConfigDefault to get started`
 
 Open a compact popup command menu for common CMake commands:
 
@@ -212,3 +232,6 @@ an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
 ## Notes
 
 - Errors are reported through Vim messages with a `[vim-cmake-naive]` prefix.
+- All `:CMake*` commands use a shared lock. If another `:CMake*` command is in
+  progress, command start is rejected with:
+  `CMake: another command <command> is already running`.

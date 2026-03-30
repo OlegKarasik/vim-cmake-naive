@@ -16,6 +16,7 @@ let s:switch_target_popup_states = {}
 let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:last_cmake_build_window_id = -1
 let s:last_cmake_build_buffer_number = -1
+let s:running_cmake_command_name = ''
 let s:cmake_menu_prompt = 'Select CMake command'
 let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
@@ -24,6 +25,7 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0},
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeInfo', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
       \ {'name': 'CMakeMenuFull', 'needs_args': 0},
       \ {'name': 'CMakeResetPreset', 'needs_args': 0},
@@ -38,6 +40,28 @@ let s:cmake_menu_compact_command_specs = [
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0}
       \ ]
+
+function! s:active_running_cmake_command() abort
+  if exists('g:vim_cmake_naive_test_forced_running_cmake_command')
+    return trim(s:to_string_or_empty(g:vim_cmake_naive_test_forced_running_cmake_command))
+  endif
+
+  return s:running_cmake_command_name
+endfunction
+
+function! s:run_cmake_command(command_name, command_funcref, command_args) abort
+  let l:running_command = s:active_running_cmake_command()
+  if !empty(l:running_command)
+    throw 'CMake: another command ' . l:running_command . ' is already running'
+  endif
+
+  let s:running_cmake_command_name = a:command_name
+  try
+    return call(a:command_funcref, a:command_args)
+  finally
+    let s:running_cmake_command_name = ''
+  endtry
+endfunction
 
 function! vim_cmake_naive#split(...) abort
   try
@@ -59,7 +83,7 @@ endfunction
 
 function! vim_cmake_naive#cmake_config() abort
   try
-    call s:run_cmake_config()
+    call s:run_cmake_command('CMakeConfig', function('s:run_cmake_config'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -67,7 +91,7 @@ endfunction
 
 function! vim_cmake_naive#switch_preset() abort
   try
-    call s:run_switch_preset()
+    call s:run_cmake_command('CMakeSwitchPreset', function('s:run_switch_preset'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -75,7 +99,7 @@ endfunction
 
 function! vim_cmake_naive#switch_target() abort
   try
-    call s:run_switch_target()
+    call s:run_cmake_command('CMakeSwitchTarget', function('s:run_switch_target'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -83,7 +107,7 @@ endfunction
 
 function! vim_cmake_naive#set_config_preset(preset) abort
   try
-    call s:run_set_config_preset(a:preset)
+    call s:run_cmake_command('CMakeConfigSetPreset', function('s:run_set_config_preset'), [a:preset])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -91,7 +115,7 @@ endfunction
 
 function! vim_cmake_naive#reset_config_preset() abort
   try
-    call s:run_reset_config_preset()
+    call s:run_cmake_command('CMakeResetPreset', function('s:run_reset_config_preset'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -99,7 +123,7 @@ endfunction
 
 function! vim_cmake_naive#reset_config_target() abort
   try
-    call s:run_reset_config_target()
+    call s:run_cmake_command('CMakeResetTarget', function('s:run_reset_config_target'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -107,7 +131,7 @@ endfunction
 
 function! vim_cmake_naive#set_config_build_config(build_config) abort
   try
-    call s:run_set_config_build_config(a:build_config)
+    call s:run_cmake_command('CMakeConfigSetBuild', function('s:run_set_config_build_config'), [a:build_config])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -115,7 +139,7 @@ endfunction
 
 function! vim_cmake_naive#set_config_output(output) abort
   try
-    call s:run_set_config_output(a:output)
+    call s:run_cmake_command('CMakeConfigSetOutput', function('s:run_set_config_output'), [a:output])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -123,7 +147,7 @@ endfunction
 
 function! vim_cmake_naive#cmake_config_default() abort
   try
-    call s:run_cmake_config_default()
+    call s:run_cmake_command('CMakeConfigDefault', function('s:run_cmake_config_default'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -131,7 +155,7 @@ endfunction
 
 function! vim_cmake_naive#generate() abort
   try
-    call s:run_generate()
+    call s:run_cmake_command('CMakeGenerate', function('s:run_generate'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -139,7 +163,15 @@ endfunction
 
 function! vim_cmake_naive#build() abort
   try
-    call s:run_build()
+    call s:run_cmake_command('CMakeBuild', function('s:run_build'), [])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#info() abort
+  try
+    call s:run_cmake_command('CMakeInfo', function('s:run_info'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -147,7 +179,13 @@ endfunction
 
 function! vim_cmake_naive#menu() abort
   try
-    call s:run_menu_with_specs(s:cmake_menu_compact_command_specs)
+    let l:selected_command = s:run_cmake_command(
+          \ 'CMakeMenu',
+          \ function('s:run_menu_with_specs'),
+          \ [s:cmake_menu_compact_command_specs])
+    if !empty(l:selected_command)
+      call s:execute_menu_command(l:selected_command)
+    endif
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -155,10 +193,104 @@ endfunction
 
 function! vim_cmake_naive#menu_full() abort
   try
-    call s:run_menu_with_specs(s:cmake_menu_full_command_specs)
+    let l:selected_command = s:run_cmake_command(
+          \ 'CMakeMenuFull',
+          \ function('s:run_menu_with_specs'),
+          \ [s:cmake_menu_full_command_specs])
+    if !empty(l:selected_command)
+      call s:execute_menu_command(l:selected_command)
+    endif
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
+endfunction
+
+function! s:run_info() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:config_exists = 1
+  let l:config_path = ''
+  let l:config = {}
+  let l:display_lines = []
+  let l:title = 'CMake info'
+
+  try
+    let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
+    let l:config = s:read_json_object(l:config_path)
+  catch
+    let l:message = s:format_exception(v:exception)
+    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') < 0
+      throw l:message
+    endif
+    let l:config_exists = 0
+  endtry
+
+  if !l:config_exists
+    let l:display_lines = ['No configuration, please use CMakeConfigDefault to get started']
+  else
+    let l:display_lines = s:config_table_lines(l:config)
+    let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+    let l:title = l:title . ' [' . s:relative_path(l:config_path, l:config_root) . ']'
+  endif
+
+  call s:show_info_popup(l:title, l:display_lines)
+endfunction
+
+function! s:config_table_lines(config) abort
+  let l:config_keys = keys(a:config)
+  if empty(l:config_keys)
+    return ['No values found in local configuration']
+  endif
+
+  call sort(l:config_keys)
+  let l:key_width = 0
+  for l:key in l:config_keys
+    let l:key_width = max([l:key_width, strlen(l:key)])
+  endfor
+
+  let l:lines = []
+  for l:key in l:config_keys
+    let l:value = get(a:config, l:key, '')
+    if type(l:value) == v:t_string
+      let l:value_text = l:value
+    else
+      let l:value_text = json_encode(l:value)
+    endif
+
+    call add(l:lines, printf('%-' . l:key_width . 's | %s', l:key, l:value_text))
+  endfor
+
+  return l:lines
+endfunction
+
+function! s:show_info_popup(title, lines) abort
+  let l:content_lines = empty(a:lines) ? [''] : copy(a:lines)
+  let l:content_width = max(map(copy(l:content_lines), 'strlen(v:val)'))
+  let l:title_width = strlen(a:title)
+  let l:popup_width = max([s:switch_popup_fixed_width, l:content_width, l:title_width])
+  let l:popup_height = max([1, min([len(l:content_lines), s:switch_popup_max_height])])
+  let l:popup_options = {
+        \ 'title': a:title,
+        \ 'highlight': 'Pmenu',
+        \ 'border': [1, 1, 1, 1],
+        \ 'borderchars': ['─', '│', '─', '│', '╭', '╮', '╯', '╰'],
+        \ 'borderhighlight': ['Pmenu'],
+        \ 'minwidth': l:popup_width,
+        \ 'maxwidth': l:popup_width,
+        \ 'minheight': l:popup_height,
+        \ 'maxheight': l:popup_height,
+        \ 'scrollbar': 1,
+        \ 'padding': [0, 1, 0, 1],
+        \ 'mapping': 0,
+        \ 'filter': 'popup_filter_menu'
+        \ }
+
+  if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let g:vim_cmake_naive_test_last_info_popup_items = copy(l:content_lines)
+    let g:vim_cmake_naive_test_last_info_popup_options = copy(l:popup_options)
+    return
+  endif
+
+  call popup_create(l:content_lines, l:popup_options)
 endfunction
 
 function! s:parse_split_args(argv) abort
@@ -462,17 +594,16 @@ function! s:run_menu_with_specs(command_specs) abort
   endif
 
   if s:should_use_popup_menu_for_preset_selection()
-    call s:show_menu_popup(s:cmake_menu_prompt, l:commands)
-    return
+    return s:show_menu_popup(s:cmake_menu_prompt, l:commands)
   endif
 
   let l:selected_command = s:select_item_from_list(s:cmake_menu_prompt, l:commands)
   if empty(l:selected_command)
     call s:write_info('CMake command selection canceled.')
-    return
+    return ''
   endif
 
-  call s:execute_menu_command(l:selected_command)
+  return l:selected_command
 endfunction
 
 function! s:menu_commands(command_specs) abort
@@ -493,24 +624,32 @@ function! s:show_menu_popup(prompt, commands) abort
   if exists('g:vim_cmake_naive_test_popup_menu_response')
     let g:vim_cmake_naive_test_last_menu_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_menu_popup_options = copy(l:popup_options)
-    call s:on_menu_popup_selection(copy(a:commands), 0, g:vim_cmake_naive_test_popup_menu_response)
-    return
+    return s:selected_menu_command_from_popup_result(copy(a:commands), g:vim_cmake_naive_test_popup_menu_response)
   endif
 
   let l:popup_options.callback = function('s:on_menu_popup_selection', [copy(a:commands)])
   call popup_menu(l:display_items, l:popup_options)
+  return ''
 endfunction
 
-function! s:on_menu_popup_selection(commands, _popup_id, result) abort
+function! s:selected_menu_command_from_popup_result(commands, result) abort
   let l:index = type(a:result) == v:t_number
         \ ? a:result
         \ : str2nr(s:to_string_or_empty(a:result))
   if l:index <= 0 || l:index > len(a:commands)
     call s:write_info('CMake command selection canceled.')
+    return ''
+  endif
+
+  return a:commands[l:index - 1]
+endfunction
+
+function! s:on_menu_popup_selection(commands, _popup_id, result) abort
+  let l:selected_command = s:selected_menu_command_from_popup_result(a:commands, a:result)
+  if empty(l:selected_command)
     return
   endif
 
-  let l:selected_command = a:commands[l:index - 1]
   call s:execute_menu_command(l:selected_command)
 endfunction
 
@@ -1563,7 +1702,7 @@ function! s:run_generate() abort
     call add(l:argv, l:preset_value)
   endif
 
-  call s:run_build_command_in_vertical_terminal(l:argv)
+  call s:run_build_command_in_vertical_terminal(l:argv, {'reuse_previous_build_window': 1})
   call s:write_info('Started generate in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
@@ -1593,8 +1732,31 @@ function! s:run_build() abort
     call add(l:argv, l:target_value)
   endif
 
-  call s:run_build_command_in_vertical_terminal(l:argv, {'reuse_previous_build_window': 1})
+  let l:build_terminal_name = s:cmake_build_terminal_running_name(l:preset_value, l:target_value)
+  call s:run_build_command_in_vertical_terminal(l:argv, {
+        \ 'reuse_previous_build_window': 1,
+        \ 'terminal_name': l:build_terminal_name,
+        \ 'success_terminal_name': 'Success',
+        \ 'failure_terminal_name_prefix': 'Failure'
+        \ })
   call s:write_info('Started build in ' . s:relative_path(l:build_directory, l:project_root))
+endfunction
+
+function! s:cmake_build_terminal_running_name(preset_value, target_value) abort
+  let l:name_parts = ['cmake', 'build']
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  let l:target_value = trim(s:to_string_or_empty(a:target_value))
+
+  if !empty(l:preset_value)
+    call add(l:name_parts, '--preset=' . l:preset_value)
+  endif
+
+  if empty(l:target_value)
+    let l:target_value = 'all'
+  endif
+  call add(l:name_parts, '--target=' . l:target_value)
+
+  return join(l:name_parts, ' ')
 endfunction
 
 function! s:generate_preset_output_directory(build_directory, preset_value) abort
@@ -1730,6 +1892,14 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endif
 
   let l:reuse_previous_build_window = s:as_condition_bool(get(l:options, 'reuse_previous_build_window', 0))
+  let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
+  let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
+  let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
+  let l:terminal_command_options = {
+        \ 'terminal_name': l:terminal_name,
+        \ 'success_terminal_name': l:success_terminal_name,
+        \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix
+        \ }
   let l:origin_window_id = win_getid()
   let l:terminal = l:reuse_previous_build_window
         \ ? s:open_previous_build_terminal_window_or_recreate()
@@ -1737,7 +1907,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
 
   try
     try
-      call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id)
+      call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id, l:terminal_command_options)
     catch
       let l:error_message = s:format_exception(v:exception)
       if !l:reuse_previous_build_window || !get(l:terminal, 'reused_existing_window', 0)
@@ -1745,7 +1915,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
       endif
 
       let l:terminal = s:replace_build_terminal_window(l:terminal.window_id)
-      call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id)
+      call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id, l:terminal_command_options)
     endtry
 
     let l:terminal.buffer_number = bufnr('%')
@@ -1778,6 +1948,7 @@ endfunction
 function! s:open_new_build_terminal_window() abort
   execute 'silent keepalt vertical botright new'
   execute 'silent file ' . fnameescape(s:build_terminal_buffer_name)
+  let b:vim_cmake_naive_build_terminal = 1
   return {
         \ 'window_id': win_getid(),
         \ 'buffer_number': bufnr('%'),
@@ -1866,10 +2037,21 @@ function! s:is_terminal_build_supported() abort
         \ && exists('*job_info')
 endfunction
 
-function! s:start_terminal_command_in_current_buffer(argv, window_id) abort
+function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
+  let l:options = get(a:000, 0, {})
+  if type(l:options) != v:t_dict
+    let l:options = {}
+  endif
+
+  let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
+  let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
+  let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
+
   let l:term_options = {'curwin': 1}
   if !s:should_capture_build_terminal_for_tests()
-    let l:term_options.exit_cb = function('s:on_build_terminal_command_exit', [a:window_id])
+    let l:term_options.exit_cb = function(
+          \ 's:on_build_terminal_command_exit',
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix])
   endif
 
   let l:job = term_start(copy(a:argv), l:term_options)
@@ -1878,23 +2060,113 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id) abort
   endif
 
   let l:terminal_buffer_number = bufnr('%')
+  call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
   call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
-    call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+    call s:set_terminal_name_for_window(
+          \ a:window_id,
+          \ s:terminal_completion_name(
+          \   l:exit_code,
+          \   l:success_terminal_name,
+          \   l:failure_terminal_name_prefix))
+    let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
+    if l:terminal_buffer_number > 0
+      call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+    endif
     if l:exit_code != 0
       call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
     endif
   endif
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, job, status) abort
-  call s:capture_build_terminal_for_tests(a:window_id, bufnr('%'))
-
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, job, status) abort
   let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
+  call s:set_terminal_name_for_window(
+        \ a:window_id,
+        \ s:terminal_completion_name(
+        \   l:exit_code,
+        \   a:success_terminal_name,
+        \   a:failure_terminal_name_prefix))
+
+  let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
+  if l:terminal_buffer_number > 0
+    call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+  endif
+
   if l:exit_code != 0
     call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
   endif
+endfunction
+
+function! s:terminal_completion_name(exit_code, success_terminal_name, failure_terminal_name_prefix) abort
+  let l:success_terminal_name = trim(s:to_string_or_empty(a:success_terminal_name))
+  if a:exit_code == 0
+    return l:success_terminal_name
+  endif
+
+  let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(a:failure_terminal_name_prefix))
+  if empty(l:failure_terminal_name_prefix)
+    return ''
+  endif
+
+  return l:failure_terminal_name_prefix . ' (' . a:exit_code . ')'
+endfunction
+
+function! s:terminal_buffer_number_for_window(window_id) abort
+  let l:window_number = win_id2win(a:window_id)
+  if l:window_number <= 0
+    return -1
+  endif
+
+  return winbufnr(l:window_number)
+endfunction
+
+function! s:buffer_numbers_with_name(buffer_name) abort
+  let l:buffer_numbers = []
+  for l:buffer_info in getbufinfo()
+    let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
+    if l:buffer_number > 0 && bufname(l:buffer_number) ==# a:buffer_name
+      call add(l:buffer_numbers, l:buffer_number)
+    endif
+  endfor
+
+  return l:buffer_numbers
+endfunction
+
+function! s:set_terminal_name_for_window(window_id, terminal_name) abort
+  let l:terminal_name = trim(s:to_string_or_empty(a:terminal_name))
+  if empty(l:terminal_name) || win_id2win(a:window_id) <= 0
+    return
+  endif
+
+  let l:origin_window_id = win_getid()
+  if !win_gotoid(a:window_id)
+    return
+  endif
+
+  try
+    let l:current_buffer_number = bufnr('%')
+    for l:conflicting_buffer_number in s:buffer_numbers_with_name(l:terminal_name)
+      if l:conflicting_buffer_number == l:current_buffer_number
+        continue
+      endif
+
+      if !getbufvar(l:conflicting_buffer_number, 'vim_cmake_naive_build_terminal', 0)
+            \ || bufwinnr(l:conflicting_buffer_number) >= 0
+        return
+      endif
+
+      execute 'silent! bwipeout! ' . l:conflicting_buffer_number
+    endfor
+
+    execute 'silent file ' . fnameescape(l:terminal_name)
+    let b:vim_cmake_naive_build_terminal = 1
+  finally
+    if win_id2win(l:origin_window_id) > 0
+      call win_gotoid(l:origin_window_id)
+    endif
+  endtry
 endfunction
 
 function! s:terminal_job_exit_code(job, status) abort
@@ -1930,7 +2202,7 @@ function! s:wait_for_terminal_command_and_read_exit_code(buffer_number) abort
   endwhile
   call term_wait(a:buffer_number, 10)
 
-  return s:terminal_job_exit_code(term_getjob(a:buffer_number), 0)
+  return s:terminal_job_exit_code(term_getjob(a:buffer_number), v:null)
 endfunction
 
 function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
@@ -1943,13 +2215,16 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
   let l:current_window_number = winnr()
   let l:is_vertical_split = winnr('h') != l:current_window_number
         \ || winnr('l') != l:current_window_number
-  let l:is_terminal = getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal'
+  let l:is_valid_buffer = a:buffer_number > 0 && bufexists(a:buffer_number)
+  let l:is_terminal = l:is_valid_buffer && getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal'
+  let l:buffer_name = l:is_valid_buffer ? bufname(a:buffer_number) : ''
   let g:vim_cmake_naive_test_last_build_terminal = {
         \ 'winid': a:window_id,
         \ 'width': l:window_width,
         \ 'window_count': winnr('$'),
         \ 'is_vertical_split': l:is_vertical_split,
         \ 'is_terminal': l:is_terminal,
+        \ 'buffer_name': l:buffer_name,
         \ 'lines': s:build_terminal_non_empty_lines(a:buffer_number)
         \ }
 endfunction
@@ -1960,6 +2235,10 @@ function! s:should_capture_build_terminal_for_tests() abort
 endfunction
 
 function! s:build_terminal_non_empty_lines(buffer_number) abort
+  if a:buffer_number <= 0 || !bufexists(a:buffer_number)
+    return []
+  endif
+
   if getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal' && exists('*term_getline')
     let l:lines = []
     let l:index = 1
