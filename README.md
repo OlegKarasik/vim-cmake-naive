@@ -94,6 +94,7 @@ This command:
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
 - opens a vertical split terminal and starts the build there asynchronously
+- reuses previously opened visible build output window when possible; otherwise recreates it
 - returns immediately; build completion and failures are reported in that terminal/messages
 
 Open a compact popup command menu for common CMake commands:

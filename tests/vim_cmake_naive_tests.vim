@@ -113,6 +113,32 @@ function! s:wait_for_captured_build_terminal_output(fragment, timeout_ms) abort
   return get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
 endfunction
 
+function! s:wait_for_running_terminal_window(timeout_ms) abort
+  if !exists('*getwininfo') || !exists('*term_getstatus')
+    return 0
+  endif
+
+  let l:elapsed = 0
+  while l:elapsed < a:timeout_ms
+    for l:window_info in getwininfo()
+      let l:buffer_number = get(l:window_info, 'bufnr', -1)
+      if l:buffer_number <= 0
+        continue
+      endif
+      if getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+        continue
+      endif
+      if stridx(term_getstatus(l:buffer_number), 'running') >= 0
+        return get(l:window_info, 'winid', 0)
+      endif
+    endfor
+    sleep 10m
+    let l:elapsed += 10
+  endwhile
+
+  return 0
+endfunction
+
 function! s:unique_id(prefix) abort
   return a:prefix . substitute(reltimestr(reltime()), '[^0-9A-Za-z]', '', 'g')
 endfunction
@@ -1097,6 +1123,144 @@ function! s:test_cmake_build_opens_vertical_terminal_with_stdout_and_stderr_outp
           \ ['--build', s:path_join(l:expected_root, 'build')],
           \ s:read_non_empty_lines(l:args_path))
   finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_build_reuses_visible_output_window_when_possible() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-reuse-window.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'echo "reuse-window-first-build"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:first_terminal = s:wait_for_captured_build_terminal_output('reuse-window-first-build', 1000)
+    let l:first_window_id = get(l:first_terminal, 'winid', 0)
+    call assert_true(l:first_window_id > 0)
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'echo "reuse-window-second-build"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:second_terminal = s:wait_for_captured_build_terminal_output('reuse-window-second-build', 1000)
+    let l:second_window_id = get(l:second_terminal, 'winid', 0)
+    call assert_true(l:second_window_id > 0)
+    call assert_equal(l:first_window_id, l:second_window_id)
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    call assert_equal(
+          \ ['--build', s:path_join(l:expected_root, 'build')],
+          \ s:read_non_empty_lines(l:args_path))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_build_recreates_visible_output_window_when_reuse_not_possible() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:state_path = s:path_join(l:fixture.root, 'cmake-build-state.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'if [ ! -f ' . shellescape(l:state_path) . ' ]; then',
+          \ '  echo "first" > ' . shellescape(l:state_path),
+          \ '  echo "replace-window-first-build-start"',
+          \ '  sleep 2',
+          \ '  echo "replace-window-first-build-end"',
+          \ '  exit 0',
+          \ 'fi',
+          \ 'echo "replace-window-second-build"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 0
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    call assert_true(s:wait_for_file(l:state_path, 1000), 'Expected first build command to start.')
+    let l:first_window_id = s:wait_for_running_terminal_window(1000)
+    call assert_true(l:first_window_id > 0)
+
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:second_terminal = s:wait_for_captured_build_terminal_output('replace-window-second-build', 2000)
+    let l:second_window_id = get(l:second_terminal, 'winid', 0)
+    call assert_true(l:second_window_id > 0)
+    call assert_true(win_id2win(l:first_window_id) == 0)
+  finally
+    sleep 2200m
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -2254,6 +2418,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_uses_existing_config_preset_and_target()
   call s:test_cmake_build_opens_vertical_terminal_with_command_output()
   call s:test_cmake_build_opens_vertical_terminal_with_stdout_and_stderr_output()
+  call s:test_cmake_build_reuses_visible_output_window_when_possible()
+  call s:test_cmake_build_recreates_visible_output_window_when_reuse_not_possible()
   call s:test_cmake_build_errors_when_no_cmakelists_found()
   call s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection()
   call s:test_cmake_menu_popup_lists_commands_and_executes_selection()

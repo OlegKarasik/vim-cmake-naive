@@ -19,3 +19,14 @@
 6. All popups with titles (which is used for selecting items) have numbers in
    front of every item and display current item with * symbol, which is placed
    between the number and item.
+
+# Debug Rules
+
+1. All debug operations MUST be scoped to repository directory. Never create or
+   edit a file outside of repository directory.
+
+# Asynchronous Rules
+
+1. All long running operations (invocation of external tools) must be
+   asynchronous.
+2. All asynchronous operations use vim terminal feature.

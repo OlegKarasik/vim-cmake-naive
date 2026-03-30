@@ -14,6 +14,8 @@ let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
 let s:switch_target_popup_states = {}
 let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
+let s:last_cmake_build_window_id = -1
+let s:last_cmake_build_buffer_number = -1
 let s:cmake_menu_prompt = 'Select CMake command'
 let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
@@ -1591,7 +1593,7 @@ function! s:run_build() abort
     call add(l:argv, l:target_value)
   endif
 
-  call s:run_build_command_in_vertical_terminal(l:argv)
+  call s:run_build_command_in_vertical_terminal(l:argv, {'reuse_previous_build_window': 1})
   call s:write_info('Started build in ' . s:relative_path(l:build_directory, l:project_root))
 endfunction
 
@@ -1713,7 +1715,7 @@ function! s:run_shell_command(argv) abort
   return l:output
 endfunction
 
-function! s:run_build_command_in_vertical_terminal(argv) abort
+function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   if empty(a:argv)
     throw 'Command arguments cannot be empty.'
   endif
@@ -1722,11 +1724,34 @@ function! s:run_build_command_in_vertical_terminal(argv) abort
     throw 'Terminal build execution is not supported in this Vim build.'
   endif
 
+  let l:options = get(a:000, 0, {})
+  if type(l:options) != v:t_dict
+    let l:options = {}
+  endif
+
+  let l:reuse_previous_build_window = s:as_condition_bool(get(l:options, 'reuse_previous_build_window', 0))
   let l:origin_window_id = win_getid()
-  let l:terminal = s:open_build_terminal_window()
+  let l:terminal = l:reuse_previous_build_window
+        \ ? s:open_previous_build_terminal_window_or_recreate()
+        \ : s:open_new_build_terminal_window()
 
   try
-    call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id)
+    try
+      call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id)
+    catch
+      let l:error_message = s:format_exception(v:exception)
+      if !l:reuse_previous_build_window || !get(l:terminal, 'reused_existing_window', 0)
+        throw l:error_message
+      endif
+
+      let l:terminal = s:replace_build_terminal_window(l:terminal.window_id)
+      call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id)
+    endtry
+
+    let l:terminal.buffer_number = bufnr('%')
+    if l:reuse_previous_build_window
+      call s:remember_previous_build_terminal_window(l:terminal)
+    endif
   finally
     if win_id2win(l:origin_window_id) > 0
       call win_gotoid(l:origin_window_id)
@@ -1734,10 +1759,106 @@ function! s:run_build_command_in_vertical_terminal(argv) abort
   endtry
 endfunction
 
-function! s:open_build_terminal_window() abort
+function! s:open_previous_build_terminal_window_or_recreate() abort
+  let l:previous_terminal = s:previous_build_terminal_window()
+  if empty(l:previous_terminal)
+    return s:open_new_build_terminal_window()
+  endif
+
+  if s:is_previous_build_terminal_window_reusable(l:previous_terminal)
+    if win_gotoid(l:previous_terminal.window_id)
+      let l:previous_terminal.reused_existing_window = 1
+      return l:previous_terminal
+    endif
+  endif
+
+  return s:replace_build_terminal_window(l:previous_terminal.window_id)
+endfunction
+
+function! s:open_new_build_terminal_window() abort
   execute 'silent keepalt vertical botright new'
   execute 'silent file ' . fnameescape(s:build_terminal_buffer_name)
-  return {'window_id': win_getid(), 'buffer_number': bufnr('%')}
+  return {
+        \ 'window_id': win_getid(),
+        \ 'buffer_number': bufnr('%'),
+        \ 'reused_existing_window': 0
+        \ }
+endfunction
+
+function! s:replace_build_terminal_window(window_id) abort
+  if win_id2win(a:window_id) <= 0
+    return s:open_new_build_terminal_window()
+  endif
+
+  call win_gotoid(a:window_id)
+  let l:old_window_id = a:window_id
+  let l:old_buffer_number = bufnr('%')
+  let l:new_terminal = s:open_new_build_terminal_window()
+  if win_id2win(l:old_window_id) > 0
+    call win_gotoid(l:old_window_id)
+    execute 'silent! close!'
+    if win_id2win(l:old_window_id) > 0
+          \ && l:old_buffer_number > 0
+          \ && bufexists(l:old_buffer_number)
+      execute 'silent! bwipeout! ' . l:old_buffer_number
+    endif
+    if win_id2win(l:new_terminal.window_id) > 0
+      call win_gotoid(l:new_terminal.window_id)
+    endif
+  endif
+
+  return l:new_terminal
+endfunction
+
+function! s:remember_previous_build_terminal_window(terminal) abort
+  let s:last_cmake_build_window_id = get(a:terminal, 'window_id', -1)
+  let s:last_cmake_build_buffer_number = get(a:terminal, 'buffer_number', -1)
+endfunction
+
+function! s:previous_build_terminal_window() abort
+  if type(s:last_cmake_build_window_id) != v:t_number || s:last_cmake_build_window_id <= 0
+    return {}
+  endif
+
+  let l:window_number = win_id2win(s:last_cmake_build_window_id)
+  if l:window_number <= 0
+    return {}
+  endif
+
+  let l:buffer_number = winbufnr(l:window_number)
+  if l:buffer_number <= 0 || !bufexists(l:buffer_number)
+    return {}
+  endif
+
+  if getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+    return {}
+  endif
+
+  return {'window_id': s:last_cmake_build_window_id, 'buffer_number': l:buffer_number}
+endfunction
+
+function! s:is_previous_build_terminal_window_reusable(terminal) abort
+  let l:window_id = get(a:terminal, 'window_id', -1)
+  let l:buffer_number = get(a:terminal, 'buffer_number', -1)
+  if win_id2win(l:window_id) <= 0 || l:buffer_number <= 0 || !bufexists(l:buffer_number)
+    return 0
+  endif
+
+  return !s:is_terminal_buffer_job_running(l:buffer_number)
+endfunction
+
+function! s:is_terminal_buffer_job_running(buffer_number) abort
+  if a:buffer_number <= 0 || !bufexists(a:buffer_number)
+    return 0
+  endif
+  if getbufvar(a:buffer_number, '&buftype', '') !=# 'terminal'
+    return 0
+  endif
+  if !exists('*term_getstatus')
+    return 0
+  endif
+
+  return stridx(term_getstatus(a:buffer_number), 'running') >= 0
 endfunction
 
 function! s:is_terminal_build_supported() abort
