@@ -84,6 +84,33 @@ function! s:create_fake_cmake_script(root, args_output_path, exit_code) abort
   return l:bin_dir
 endfunction
 
+function! s:create_fake_cmake_generate_script_with_compile_commands(root, args_output_path, compile_commands, exit_code) abort
+  let l:bin_dir = s:path_join(a:root, 'fake-bin')
+  call mkdir(l:bin_dir, 'p')
+  let l:script_path = s:path_join(l:bin_dir, 'cmake')
+  let l:compile_commands_seed_path = s:path_join(a:root, 'fake-compile-commands-seed.json')
+  call s:write_json(l:compile_commands_seed_path, a:compile_commands)
+  call writefile([
+        \ '#!/bin/sh',
+        \ 'printf "%s\n" "$@" > ' . shellescape(a:args_output_path),
+        \ 'build_dir=""',
+        \ 'previous=""',
+        \ 'for argument in "$@"; do',
+        \ '  if [ "$previous" = "-B" ]; then',
+        \ '    build_dir="$argument"',
+        \ '  fi',
+        \ '  previous="$argument"',
+        \ 'done',
+        \ 'if [ -n "$build_dir" ]; then',
+        \ '  mkdir -p "$build_dir"',
+        \ '  cat ' . shellescape(l:compile_commands_seed_path) . ' > "$build_dir/compile_commands.json"',
+        \ 'fi',
+        \ 'exit ' . string(a:exit_code)
+        \ ], l:script_path, 'b')
+  call system('chmod +x ' . shellescape(l:script_path))
+  return l:bin_dir
+endfunction
+
 function! s:read_non_empty_lines(path) abort
   return filter(readfile(a:path, 'b'), '!empty(v:val)')
 endfunction
@@ -989,6 +1016,116 @@ function! s:test_cmake_generate_errors_when_no_cmakelists_found() abort
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_commands() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-cache-args.txt')
+    let l:bin_dir = s:create_fake_cmake_generate_script_with_compile_commands(
+          \ l:fixture.root,
+          \ l:args_path,
+          \ s:fixture_entries(),
+          \ 0)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#generate()
+
+    let l:cache_path = s:path_join(l:fixture.root, '.vim/.cmake/cache.json')
+    let l:app_split_path = s:path_join(
+          \ s:path_join(s:path_join(l:fixture.root, 'build/CMakeFiles'), 'app.dir'),
+          \ 'compile_commands.json')
+    let l:lib_split_path = s:path_join(
+          \ s:path_join(s:path_join(l:fixture.root, 'build/lib/CMakeFiles'), 'mylib.dir'),
+          \ 'compile_commands.json')
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
+    call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
+    call assert_true(filereadable(l:app_split_path), 'Expected app split compile_commands.json to be written.')
+    call assert_true(filereadable(l:lib_split_path), 'Expected mylib split compile_commands.json to be written.')
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_commands_for_preset_directory() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': 'dev', 'build': 'Release'})
+
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-cache-preset-args.txt')
+    let l:bin_dir = s:create_fake_cmake_generate_script_with_compile_commands(
+          \ l:fixture.root,
+          \ l:args_path,
+          \ s:fixture_entries(),
+          \ 0)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#generate()
+
+    let l:cache_path = s:path_join(l:fixture.root, '.vim/.cmake/cache.json')
+    let l:preset_root = s:path_join(l:fixture.root, 'out/build-dir/dev')
+    let l:app_split_path = s:path_join(
+          \ s:path_join(s:path_join(l:preset_root, 'CMakeFiles'), 'app.dir'),
+          \ 'compile_commands.json')
+    let l:lib_split_path = s:path_join(
+          \ s:path_join(s:path_join(l:preset_root, 'lib/CMakeFiles'), 'mylib.dir'),
+          \ 'compile_commands.json')
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
+    call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
+    call assert_true(filereadable(l:app_split_path), 'Expected app split compile_commands.json in preset directory.')
+    call assert_true(filereadable(l:lib_split_path), 'Expected mylib split compile_commands.json in preset directory.')
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
   endtry
 endfunction
 
@@ -2121,7 +2258,7 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(
-          \ ['1.   none', '2.   default', '3. * dev', '4.   release'],
+          \ ['1.   (none)', '2.   default', '3. * dev', '4.   release'],
           \ get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
     call assert_equal('Select CMake preset', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_preset_popup_options, 'minwidth', 0))
@@ -2197,7 +2334,7 @@ function! s:test_switch_preset_popup_display_items_marks_none_when_preset_missin
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(
-          \ ['1. * none', '2.   default', '3.   dev', '4.   release'],
+          \ ['1. * (none)', '2.   default', '3.   dev', '4.   release'],
           \ get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
     call assert_equal({'keep': 1}, s:read_json(l:config_path))
   finally
@@ -2353,6 +2490,7 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -2406,6 +2544,7 @@ function! s:test_cmake_switch_target_selects_all_and_removes_target_key() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
 
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
     call s:write_json(l:root_commands, s:fixture_entries())
@@ -2452,6 +2591,7 @@ function! s:test_cmake_switch_target_popup_sets_selected_target() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -2503,30 +2643,19 @@ function! s:test_cmake_switch_target_popup_sets_selected_target() abort
   endtry
 endfunction
 
-function! s:test_cmake_switch_target_reports_missing_preset_root_compile_commands() abort
+function! s:test_cmake_switch_target_reports_missing_cache_file() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call s:write_json(l:config_path, {'output': 'build', 'preset': 'missing-preset'})
-
-    let l:output_root_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
-    call s:write_json(l:output_root_commands, [
-          \ {
-          \   'directory': '.',
-          \   'output': 'CMakeFiles/default_app.dir/default.cpp.o',
-          \   'file': '../default.cpp'
-          \ }
-          \ ])
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
     call vim_cmake_naive#switch_target()
 
-    let l:expected_root = s:path_join(l:fixture.root, 'build/missing-preset/compile_commands.json')
     let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, 'Root compile_commands.json not found at:') >= 0)
-    call assert_true(stridx(l:messages, l:expected_root) >= 0)
+    call assert_true(stridx(l:messages, 'No cache found. Please run CMakeGenerate command first.') >= 0)
     call assert_false(has_key(s:read_json(l:config_path), 'target'))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -2544,6 +2673,7 @@ function! s:test_cmake_switch_target_cancels_without_changing_config() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'stay'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
 
     let l:target_dir = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
@@ -2592,6 +2722,7 @@ function! s:test_cmake_switch_target_reports_missing_build_directory() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'missing-build', 'preset': 'dev'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
 
     execute 'cd ' . fnameescape(l:fixture.root)
     call vim_cmake_naive#switch_target()
@@ -2605,7 +2736,7 @@ function! s:test_cmake_switch_target_reports_missing_build_directory() abort
   endtry
 endfunction
 
-function! s:test_cmake_switch_target_selects_all_when_no_targets_in_file() abort
+function! s:test_cmake_switch_target_selects_all_when_cache_targets_are_empty() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
@@ -2615,6 +2746,7 @@ function! s:test_cmake_switch_target_selects_all_when_no_targets_in_file() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': []})
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
     call mkdir(s:path_join(l:fixture.root, 'build/dev'), 'p')
@@ -2649,7 +2781,7 @@ function! s:test_cmake_switch_target_selects_all_when_no_targets_in_file() abort
   endtry
 endfunction
 
-function! s:test_cmake_switch_target_splits_root_when_selected_target_file_missing() abort
+function! s:test_cmake_switch_target_reports_missing_target_compile_commands() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
@@ -2659,24 +2791,19 @@ function! s:test_cmake_switch_target_splits_root_when_selected_target_file_missi
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
 
     let l:scan_root = s:path_join(l:fixture.root, 'build/dev')
     let l:target_dir = s:path_join(l:scan_root, 'CMakeFiles/app.dir')
-    let l:root_commands = s:path_join(l:scan_root, 'compile_commands.json')
-    let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
     call mkdir(l:target_dir, 'p')
-    call s:write_json(l:root_commands, s:fixture_entries())
 
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_inputlist_response = 2
     call vim_cmake_naive#switch_target()
 
-    call assert_true(filereadable(s:path_join(l:scan_root, 'CMakeFiles/app.dir/compile_commands.json')))
-    call assert_true(filereadable(l:active_commands))
-    call assert_equal(
-          \ readfile(s:path_join(l:scan_root, 'CMakeFiles/app.dir/compile_commands.json'), 'b'),
-          \ readfile(l:active_commands, 'b'))
-    call assert_equal('app', get(s:read_json(l:config_path), 'target', ''))
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'Source file not found:') >= 0)
+    call assert_false(has_key(s:read_json(l:config_path), 'target'))
   finally
     if l:initial_selection is v:null
       unlet! g:vim_cmake_naive_test_inputlist_response
@@ -2698,17 +2825,20 @@ function! s:test_cmake_switch_target_splits_root_when_selected_target_file_missi
   endtry
 endfunction
 
-function! s:test_cmake_switch_target_reports_missing_output_root_compile_commands() abort
+function! s:test_cmake_switch_target_reports_missing_root_compile_commands_for_all_selection() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
 
     call mkdir(s:path_join(l:fixture.root, 'build/CMakeFiles/app.dir'), 'p')
 
     execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 1
     call vim_cmake_naive#switch_target()
 
     let l:expected_root = s:path_join(l:fixture.root, 'build/compile_commands.json')
@@ -2718,6 +2848,11 @@ function! s:test_cmake_switch_target_reports_missing_output_root_compile_command
     call assert_false(has_key(s:read_json(l:config_path), 'target'))
     call assert_false(filereadable(s:path_join(l:fixture.root, 'build/compile_commands.json')))
   finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -2726,10 +2861,12 @@ endfunction
 function! s:test_cmake_switch_target_does_not_fallback_to_output_root_when_preset_is_set() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
 
     let l:target_dir = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:output_root_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
@@ -2737,6 +2874,7 @@ function! s:test_cmake_switch_target_does_not_fallback_to_output_root_when_prese
     call s:write_json(l:output_root_commands, s:fixture_entries())
 
     execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_inputlist_response = 1
     call vim_cmake_naive#switch_target()
 
     let l:preset_root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
@@ -2747,6 +2885,11 @@ function! s:test_cmake_switch_target_does_not_fallback_to_output_root_when_prese
     call assert_false(filereadable(l:split_target_commands))
     call assert_false(has_key(s:read_json(l:config_path), 'target'))
   finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -2765,6 +2908,7 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 't11'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11']})
 
     let l:targets = ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11']
     let l:root_entries = []
@@ -2793,7 +2937,7 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
     call vim_cmake_naive#switch_target()
 
     call assert_equal(
-          \ [' 1.   all', ' 2.   t01', ' 3.   t02', ' 4.   t03', ' 5.   t04', ' 6.   t05', ' 7.   t06', ' 8.   t07', ' 9.   t08', '10.   t09', '11.   t10', '12. * t11'],
+          \ [' 1.   (all)', ' 2.   t01', ' 3.   t02', ' 4.   t03', ' 5.   t04', ' 6.   t05', ' 7.   t06', ' 8.   t07', ' 9.   t08', '10.   t09', '11.   t10', '12. * t11'],
           \ get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
     call assert_equal('Select CMake target', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'minwidth', 0))
@@ -2856,6 +3000,7 @@ function! s:test_switch_target_popup_filters_items_by_search_query() abort
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -2936,6 +3081,7 @@ function! s:test_switch_target_popup_display_items_marks_all_when_target_missing
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
 
     let l:target_dir = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
@@ -2959,7 +3105,7 @@ function! s:test_switch_target_popup_display_items_marks_all_when_target_missing
     unlet! g:vim_cmake_naive_test_last_target_popup_options
     call vim_cmake_naive#switch_target()
 
-    call assert_equal(['1. * all', '2.   app'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
+    call assert_equal(['1. * (all)', '2.   app'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
     call assert_equal({'output': 'build', 'preset': 'dev'}, s:read_json(l:config_path))
     call assert_equal([json_encode([{'file': '../active-before-popup.cpp'}])], readfile(l:active_commands, 'b'))
   finally
@@ -3032,6 +3178,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_generate_opens_vertical_terminal_with_command_output()
   call s:test_cmake_generate_reuses_visible_output_window_when_possible()
   call s:test_cmake_generate_errors_when_no_cmakelists_found()
+  call s:test_cmake_generate_updates_targets_cache_and_splits_compile_commands()
+  call s:test_cmake_generate_updates_targets_cache_and_splits_compile_commands_for_preset_directory()
   call s:test_cmake_build_creates_default_config_and_invokes_cmake_build()
   call s:test_cmake_build_uses_existing_config_preset_and_target()
   call s:test_cmake_build_sets_running_terminal_name_with_preset_and_target()
@@ -3060,12 +3208,12 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_target_sets_selected_target()
   call s:test_cmake_switch_target_selects_all_and_removes_target_key()
   call s:test_cmake_switch_target_popup_sets_selected_target()
-  call s:test_cmake_switch_target_reports_missing_preset_root_compile_commands()
+  call s:test_cmake_switch_target_reports_missing_cache_file()
   call s:test_cmake_switch_target_cancels_without_changing_config()
   call s:test_cmake_switch_target_reports_missing_build_directory()
-  call s:test_cmake_switch_target_selects_all_when_no_targets_in_file()
-  call s:test_cmake_switch_target_splits_root_when_selected_target_file_missing()
-  call s:test_cmake_switch_target_reports_missing_output_root_compile_commands()
+  call s:test_cmake_switch_target_selects_all_when_cache_targets_are_empty()
+  call s:test_cmake_switch_target_reports_missing_target_compile_commands()
+  call s:test_cmake_switch_target_reports_missing_root_compile_commands_for_all_selection()
   call s:test_cmake_switch_target_does_not_fallback_to_output_root_when_preset_is_set()
   call s:test_switch_target_popup_display_items_marks_current_selection_and_limits_height()
   call s:test_switch_target_popup_filters_items_by_search_query()

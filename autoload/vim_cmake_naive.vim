@@ -2,6 +2,7 @@ let s:default_input_filename = 'compile_commands.json'
 let s:default_output_filename = 'compile_commands.json'
 let s:cmake_config_relative_path = '.vim/.cmake/.config.json'
 let s:cmake_presets_filename = 'CMakePresets.json'
+let s:cmake_cache_filename = 'cache.json'
 let s:cmake_config_preset_key = 'preset'
 let s:cmake_config_build_config_key = 'build'
 let s:cmake_config_output_key = 'output'
@@ -739,7 +740,10 @@ function! s:should_use_popup_menu_for_preset_selection() abort
 endfunction
 
 function! s:show_switch_preset_popup(prompt, items, current_preset) abort
-  let l:display_items = s:preset_popup_display_items(a:items, a:current_preset)
+  let l:display_items = s:preset_popup_display_items(
+        \ a:items,
+        \ a:current_preset,
+        \ {s:cmake_switch_preset_none_name: '(' . s:cmake_switch_preset_none_name . ')'})
   let l:popup_options = s:switch_preset_popup_options(a:prompt, a:items)
   if exists('g:vim_cmake_naive_test_popup_menu_response')
     let g:vim_cmake_naive_test_last_preset_popup_items = copy(l:display_items)
@@ -777,14 +781,16 @@ function! s:switch_preset_popup_options(prompt, items) abort
   return l:popup_options
 endfunction
 
-function! s:preset_popup_display_items(items, current_preset) abort
+function! s:preset_popup_display_items(items, current_preset, ...) abort
+  let l:display_names = a:0 > 0 && type(a:1) == v:t_dict ? a:1 : {}
   let l:display_items = []
   let l:number_width = strlen(string(len(a:items)))
   let l:index = 0
   while l:index < len(a:items)
     let l:item = a:items[l:index]
+    let l:display_name = get(l:display_names, l:item, l:item)
     let l:marker = (!empty(a:current_preset) && l:item ==# a:current_preset) ? '*' : ' '
-    let l:display_item = printf('%' . l:number_width . 'd.', l:index + 1) . ' ' . l:marker . ' ' . l:item
+    let l:display_item = printf('%' . l:number_width . 'd.', l:index + 1) . ' ' . l:marker . ' ' . l:display_name
     call add(l:display_items, l:display_item)
     let l:index += 1
   endwhile
@@ -869,6 +875,8 @@ function! s:run_switch_target() abort
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   let l:current_target = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
+  let l:targets = s:cached_targets_for_switch(l:config_path)
+  call insert(l:targets, s:cmake_switch_target_all_name)
   if empty(l:current_target)
     let l:current_target = s:cmake_switch_target_all_name
   endif
@@ -882,15 +890,6 @@ function! s:run_switch_target() abort
   endif
 
   let l:scan_directory = s:target_scan_directory(l:build_directory, l:preset_value)
-  let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
-        \ l:build_directory,
-        \ l:scan_directory,
-        \ l:preset_value)
-  let l:targets = s:available_targets(l:scan_directory, l:root_compile_commands_path)
-  call insert(l:targets, s:cmake_switch_target_all_name)
-  if empty(l:targets)
-    throw 'No selectable targets found in file: ' . l:root_compile_commands_path
-  endif
 
   if s:should_use_popup_menu_for_preset_selection()
     call s:show_switch_target_popup(
@@ -966,7 +965,10 @@ function! s:switch_target_popup_display_items(items, current_target) abort
     return ['1.   no matches']
   endif
 
-  return s:preset_popup_display_items(a:items, a:current_target)
+  return s:preset_popup_display_items(
+        \ a:items,
+        \ a:current_target,
+        \ {s:cmake_switch_target_all_name: '(' . s:cmake_switch_target_all_name . ')'})
 endfunction
 
 function! s:filter_switch_target_popup_items(items, query) abort
@@ -1086,14 +1088,41 @@ function! s:apply_switch_target_selection(selected_target, preset_value, build_d
   endif
 
   let l:target_directory = s:resolve_selected_target_directory(a:selected_target, a:scan_directory)
-  let l:source_file_path = s:ensure_target_compile_commands(
-        \ a:selected_target,
-        \ l:target_directory,
-        \ a:preset_value,
-        \ a:build_directory,
-        \ a:scan_directory)
+  let l:source_file_path = s:path_join(l:target_directory, s:default_input_filename)
   call s:copy_compile_commands_file(l:source_file_path, a:build_directory)
   call s:set_config_value(s:cmake_config_target_key, a:selected_target, 1)
+endfunction
+
+function! s:cached_targets_for_switch(config_path) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+
+  let l:cache_path = s:cmake_cache_path(a:config_path)
+  if !filereadable(l:cache_path)
+    throw 'No cache found. Please run CMakeGenerate command first.'
+  endif
+
+  let l:cache_payload = s:read_json_object(l:cache_path)
+  let l:targets = get(l:cache_payload, 'targets', [])
+  if type(l:targets) != v:t_list
+    throw 'Cache file ''' . l:cache_path . ''' key "targets" must be a JSON array.'
+  endif
+
+  let l:result = []
+  let l:seen = {}
+  for l:target in l:targets
+    let l:target_name = trim(s:to_string_or_empty(l:target))
+    if empty(l:target_name) || has_key(l:seen, l:target_name)
+      continue
+    endif
+
+    let l:seen[l:target_name] = 1
+    call add(l:result, l:target_name)
+  endfor
+
+  call sort(l:result)
+  return l:result
 endfunction
 
 function! s:available_targets(scan_directory, root_compile_commands_path) abort
@@ -1776,8 +1805,83 @@ function! s:run_generate() abort
     call add(l:argv, l:preset_value)
   endif
 
-  call s:run_build_command_in_vertical_terminal(l:argv, {'reuse_previous_build_window': 1})
+  let l:generate_completion_context = {
+        \ 'config_path': l:config_path,
+        \ 'project_root': l:project_root,
+        \ 'build_directory': l:build_directory,
+        \ 'scan_directory': l:generation_directory
+        \ }
+  call s:run_build_command_in_vertical_terminal(l:argv, {
+        \ 'reuse_previous_build_window': 1,
+        \ 'on_success_callback': function('s:on_generate_command_success', [copy(l:generate_completion_context)])
+        \ })
   call s:write_info('Started generate in ' . s:relative_path(l:generation_directory, l:project_root))
+endfunction
+
+function! s:on_generate_command_success(context) abort
+  try
+    call s:update_generate_targets_cache_and_split(a:context)
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! s:update_generate_targets_cache_and_split(context) abort
+  if type(a:context) != v:t_dict
+    throw 'Generate completion context must be a JSON object.'
+  endif
+
+  let l:config_path = s:to_string_or_empty(get(a:context, 'config_path', ''))
+  let l:project_root = s:to_string_or_empty(get(a:context, 'project_root', ''))
+  let l:build_directory = s:to_string_or_empty(get(a:context, 'build_directory', ''))
+  let l:scan_directory = s:to_string_or_empty(get(a:context, 'scan_directory', ''))
+  if empty(trim(l:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if empty(trim(l:build_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+  if empty(trim(l:scan_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
+        \ l:build_directory,
+        \ l:scan_directory,
+        \ '')
+  let l:targets = s:available_targets(l:scan_directory, l:root_compile_commands_path)
+  let l:cache_path = s:update_local_targets_cache(l:config_path, l:targets)
+  call s:run_split({
+        \ 'build_directory': l:scan_directory,
+        \ 'input_path': l:root_compile_commands_path,
+        \ 'output_name': s:default_output_filename,
+        \ 'dry_run': 0
+        \ })
+
+  if !empty(l:project_root)
+    call s:write_info('Updated target cache in ' . s:relative_path(l:cache_path, l:project_root))
+  else
+    call s:write_info('Updated target cache in ' . l:cache_path)
+  endif
+endfunction
+
+function! s:update_local_targets_cache(config_path, targets) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if type(a:targets) != v:t_list
+    throw 'Targets value must be a JSON array.'
+  endif
+
+  let l:cache_path = s:cmake_cache_path(a:config_path)
+  let l:cache_payload = filereadable(l:cache_path)
+        \ ? s:read_json_object(l:cache_path)
+        \ : {}
+  let l:cache_payload.targets = copy(a:targets)
+  call mkdir(fnamemodify(l:cache_path, ':h'), 'p')
+  call s:write_json_file(l:cache_path, l:cache_payload)
+
+  return l:cache_path
 endfunction
 
 function! s:run_build() abort
@@ -1989,10 +2093,12 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
+  let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:terminal_command_options = {
         \ 'terminal_name': l:terminal_name,
         \ 'success_terminal_name': l:success_terminal_name,
-        \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix
+        \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix,
+        \ 'on_success_callback': l:OnSuccessCallback
         \ }
   let l:origin_window_id = win_getid()
   let l:terminal = l:reuse_previous_build_window
@@ -2140,12 +2246,13 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
+  let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
 
   let l:term_options = {'curwin': 1}
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix])
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:OnSuccessCallback])
   endif
 
   let l:job = term_start(copy(a:argv), l:term_options)
@@ -2168,13 +2275,15 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
     endif
-    if l:exit_code != 0
+    if l:exit_code == 0
+      call s:invoke_terminal_success_callback(l:OnSuccessCallback)
+    else
       call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
     endif
   endif
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, OnSuccessCallback, job, status) abort
   let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
   call s:set_terminal_name_for_window(
         \ a:window_id,
@@ -2188,9 +2297,23 @@ function! s:on_build_terminal_command_exit(window_id, success_terminal_name, fai
     call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   endif
 
-  if l:exit_code != 0
+  if l:exit_code == 0
+    call s:invoke_terminal_success_callback(a:OnSuccessCallback)
+  else
     call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
   endif
+endfunction
+
+function! s:invoke_terminal_success_callback(Callback) abort
+  if type(a:Callback) != v:t_func
+    return
+  endif
+
+  try
+    call call(a:Callback, [])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
 endfunction
 
 function! s:terminal_completion_name(exit_code, success_terminal_name, failure_terminal_name_prefix) abort
@@ -2359,6 +2482,14 @@ endfunction
 
 function! s:cmake_config_path(project_root) abort
   return s:path_join(a:project_root, s:cmake_config_relative_path)
+endfunction
+
+function! s:cmake_cache_path(config_path) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+
+  return s:path_join(fnamemodify(a:config_path, ':h'), s:cmake_cache_filename)
 endfunction
 
 function! s:cmake_presets_path(project_root) abort
