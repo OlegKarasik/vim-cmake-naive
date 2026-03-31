@@ -5,11 +5,12 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides fourteen commands:
+It provides thirteen commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
 - `:CMakeSwitchPreset`
+- `:CMakeSwitchBuild`
 - `:CMakeSwitchTarget`
 - `:CMakeGenerate`
 - `:CMakeBuild`
@@ -17,8 +18,6 @@ It provides fourteen commands:
 - `:CMakeMenu`
 - `:CMakeMenuFull`
 - `:CMakeConfigSetPreset <preset>`
-- `:CMakeResetPreset`
-- `:CMakeResetTarget`
 - `:CMakeConfigSetBuild <value>`
 - `:CMakeConfigSetOutput <value>`
 
@@ -125,7 +124,7 @@ Open a compact popup command menu for common CMake commands:
 ```
 
 This command:
-- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeSwitchPreset`, `CMakeSwitchTarget`
+- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeSwitchPreset`, `CMakeSwitchBuild`, `CMakeSwitchTarget`
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - executes the selected command
 
@@ -150,8 +149,11 @@ Switch local CMake preset from `CMakePresets.json`:
 This command:
 - finds nearest `CMakeLists.txt` from current directory upward
 - reads `CMakePresets.json` at that project root
+- always includes predefined preset `none`
 - lists selectable configure presets (non-hidden, condition evaluates to true) in sorted order
 - prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetPreset`
+- when a preset other than `none` is selected, removes `build` key from local config
+- when `none` is selected, removes `preset` key from local config
 - popup entries are ordered and prefixed with a number
 - currently selected preset is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
@@ -159,6 +161,23 @@ This command:
 - popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 
 If `CMakePresets.json` is missing, the command reports an error.
+
+Switch local CMake build type:
+
+```vim
+:CMakeSwitchBuild
+```
+
+This command:
+- reads nearest existing `.vim/.cmake/.config.json`
+- always lists default build types: `Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`
+- prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetBuild`
+- removes `preset` key from local config after applying selected build type
+- popup entries are ordered and prefixed with a number
+- currently selected build type is marked with `*`
+- popup uses smooth single-line borders with standard Vim popup colors
+- popup title has no trailing `:`
+- popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 
 Switch local CMake target from discovered target folders:
 
@@ -169,9 +188,13 @@ Switch local CMake target from discovered target folders:
 This command:
 - reads nearest existing `.vim/.cmake/.config.json`
 - resolves build directory from config `output` (relative to config root)
-- uses config `preset` to scan `<output>/<preset>` when that directory exists, otherwise falls back to `<output>`
-- discovers target directories in `**/CMakeFiles/*.dir`
+- reads root `compile_commands.json` from:
+  - `<output>/<preset>/compile_commands.json` when config `preset` is non-empty
+  - `<output>/compile_commands.json` when config `preset` is empty
+- always includes predefined target `all`
+- discovers selectable targets from entries in that root `compile_commands.json`
 - prompts through a popup menu for selection (fallback to inputlist) and writes selected target to config key `target`
+- when `all` is selected, removes `target` key from local config
 - popup supports live search: start typing to filter available targets (`Backspace` removes, `Ctrl-U` clears)
 - popup entries are ordered and prefixed with a number
 - currently selected target is marked with `*`
@@ -179,7 +202,8 @@ This command:
 - popup title has no trailing `:`
 - popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 - copies selected target `compile_commands.json` to `<output>/compile_commands.json`
-- if selected target file is missing, splits root `compile_commands.json` (found at `<output>/<preset>` or `<output>`) and retries copy
+- when `all` is selected, copies root `compile_commands.json` to `<output>/compile_commands.json`
+- if selected target file is missing, splits root `compile_commands.json` from the same location and retries copy
 
 Set the local CMake preset in `.vim/.cmake/.config.json`:
 
@@ -191,22 +215,6 @@ Set the local CMake preset in `.vim/.cmake/.config.json`:
 This updates the nearest existing `.vim/.cmake/.config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
-
-Reset the local CMake preset to empty:
-
-```vim
-:CMakeResetPreset
-```
-
-This creates the config file if needed and sets the `preset` key to `""`.
-
-Reset the local CMake target to empty:
-
-```vim
-:CMakeResetTarget
-```
-
-This creates the config file if needed and sets the `target` key to `""`.
 
 Set local CMake build config in `.vim/.cmake/.config.json`:
 

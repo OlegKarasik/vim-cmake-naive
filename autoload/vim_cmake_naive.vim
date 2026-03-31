@@ -8,6 +8,9 @@ let s:cmake_config_output_key = 'output'
 let s:cmake_config_target_key = 'target'
 let s:cmake_config_default_build = 'Debug'
 let s:cmake_config_default_output = 'build'
+let s:cmake_switch_preset_none_name = 'none'
+let s:cmake_switch_target_all_name = 'all'
+let s:cmake_switch_build_default_types = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel']
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_popup_fixed_width = 30
@@ -22,14 +25,13 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
       \ {'name': 'CMakeConfigDefault', 'needs_args': 0},
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchBuild', 'needs_args': 0},
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0},
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
       \ {'name': 'CMakeInfo', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
       \ {'name': 'CMakeMenuFull', 'needs_args': 0},
-      \ {'name': 'CMakeResetPreset', 'needs_args': 0},
-      \ {'name': 'CMakeResetTarget', 'needs_args': 0},
       \ {'name': 'CMakeConfigSetPreset', 'needs_args': 1},
       \ {'name': 'CMakeConfigSetBuild', 'needs_args': 1},
       \ {'name': 'CMakeConfigSetOutput', 'needs_args': 1}
@@ -38,6 +40,7 @@ let s:cmake_menu_compact_command_specs = [
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchBuild', 'needs_args': 0},
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0}
       \ ]
 
@@ -97,6 +100,14 @@ function! vim_cmake_naive#switch_preset() abort
   endtry
 endfunction
 
+function! vim_cmake_naive#switch_build() abort
+  try
+    call s:run_cmake_command('CMakeSwitchBuild', function('s:run_switch_build'), [])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
 function! vim_cmake_naive#switch_target() abort
   try
     call s:run_cmake_command('CMakeSwitchTarget', function('s:run_switch_target'), [])
@@ -108,22 +119,6 @@ endfunction
 function! vim_cmake_naive#set_config_preset(preset) abort
   try
     call s:run_cmake_command('CMakeConfigSetPreset', function('s:run_set_config_preset'), [a:preset])
-  catch
-    call s:write_error(s:format_exception(v:exception))
-  endtry
-endfunction
-
-function! vim_cmake_naive#reset_config_preset() abort
-  try
-    call s:run_cmake_command('CMakeResetPreset', function('s:run_reset_config_preset'), [])
-  catch
-    call s:write_error(s:format_exception(v:exception))
-  endtry
-endfunction
-
-function! vim_cmake_naive#reset_config_target() abort
-  try
-    call s:run_cmake_command('CMakeResetTarget', function('s:run_reset_config_target'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -532,14 +527,6 @@ function! s:run_set_config_preset(preset) abort
   call s:set_config_value(s:cmake_config_preset_key, l:preset, 1)
 endfunction
 
-function! s:run_reset_config_preset() abort
-  call s:set_config_value(s:cmake_config_preset_key, '')
-endfunction
-
-function! s:run_reset_config_target() abort
-  call s:set_config_value(s:cmake_config_target_key, '')
-endfunction
-
 function! s:run_set_config_build_config(build_config) abort
   let l:build_config = s:to_string_or_empty(a:build_config)
   if empty(trim(l:build_config))
@@ -569,9 +556,10 @@ function! s:run_switch_preset() abort
   let l:available_presets = s:available_configure_presets(l:presets_payload, l:project_root)
   call sort(l:available_presets)
   let l:current_preset = s:current_config_preset_for_switch(l:working_directory)
-  if empty(l:available_presets)
-    throw 'No selectable configure presets found in ' . s:cmake_presets_filename . '.'
+  if empty(l:current_preset)
+    let l:current_preset = s:cmake_switch_preset_none_name
   endif
+  call insert(l:available_presets, s:cmake_switch_preset_none_name)
 
   if s:should_use_popup_menu_for_preset_selection()
     call s:show_switch_preset_popup(l:selection_prompt, l:available_presets, l:current_preset)
@@ -584,7 +572,27 @@ function! s:run_switch_preset() abort
     return
   endif
 
-  call s:run_set_config_preset(l:selected_preset)
+  call s:apply_switch_preset_selection(l:selected_preset)
+endfunction
+
+function! s:run_switch_build() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:selection_prompt = 'Select CMake build'
+  let l:current_build = s:current_config_build_for_switch(l:working_directory)
+  let l:available_builds = copy(s:cmake_switch_build_default_types)
+
+  if s:should_use_popup_menu_for_preset_selection()
+    call s:show_switch_build_popup(l:selection_prompt, l:available_builds, l:current_build)
+    return
+  endif
+
+  let l:selected_build = s:select_item_from_menu(l:selection_prompt, l:available_builds)
+  if empty(l:selected_build)
+    call s:write_info('Build selection canceled.')
+    return
+  endif
+
+  call s:apply_switch_build_selection(l:selected_build)
 endfunction
 
 function! s:run_menu_with_specs(command_specs) abort
@@ -704,6 +712,22 @@ function! s:current_config_preset_for_switch(start_directory) abort
   return trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
 endfunction
 
+function! s:current_config_build_for_switch(start_directory) abort
+  try
+    let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
+  catch
+    let l:message = s:format_exception(v:exception)
+    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0
+      return s:cmake_config_default_build
+    endif
+    throw l:message
+  endtry
+
+  let l:config = s:read_json_object(l:config_path)
+  let l:build = trim(s:to_string_or_empty(get(l:config, s:cmake_config_build_config_key, '')))
+  return empty(l:build) ? s:cmake_config_default_build : l:build
+endfunction
+
 function! s:should_use_popup_menu_for_preset_selection() abort
   if exists('g:vim_cmake_naive_test_use_popup_menu')
     return s:as_condition_bool(g:vim_cmake_naive_test_use_popup_menu)
@@ -779,10 +803,61 @@ function! s:on_switch_preset_popup_selection(items, _popup_id, result) abort
 
   let l:selected_preset = a:items[l:index - 1]
   try
-    call s:run_set_config_preset(l:selected_preset)
+    call s:apply_switch_preset_selection(l:selected_preset)
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
+endfunction
+
+function! s:show_switch_build_popup(prompt, items, current_build) abort
+  let l:display_items = s:preset_popup_display_items(a:items, a:current_build)
+  let l:popup_options = s:switch_build_popup_options(a:prompt, a:items)
+  if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let g:vim_cmake_naive_test_last_build_popup_items = copy(l:display_items)
+    let g:vim_cmake_naive_test_last_build_popup_options = copy(l:popup_options)
+    call s:on_switch_build_popup_selection(copy(a:items), 0, g:vim_cmake_naive_test_popup_menu_response)
+    return
+  endif
+
+  call popup_menu(l:display_items, l:popup_options)
+endfunction
+
+function! s:switch_build_popup_options(prompt, items) abort
+  let l:popup_options = s:switch_popup_options(a:prompt, a:items)
+  let l:popup_options.callback = function('s:on_switch_build_popup_selection', [copy(a:items)])
+  return l:popup_options
+endfunction
+
+function! s:on_switch_build_popup_selection(items, _popup_id, result) abort
+  let l:index = type(a:result) == v:t_number
+        \ ? a:result
+        \ : str2nr(s:to_string_or_empty(a:result))
+  if l:index <= 0 || l:index > len(a:items)
+    call s:write_info('Build selection canceled.')
+    return
+  endif
+
+  let l:selected_build = a:items[l:index - 1]
+  try
+    call s:apply_switch_build_selection(l:selected_build)
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! s:apply_switch_preset_selection(selected_preset) abort
+  if a:selected_preset ==# s:cmake_switch_preset_none_name
+    call s:remove_config_value(s:cmake_config_preset_key, 1)
+    return
+  endif
+
+  call s:run_set_config_preset(a:selected_preset)
+  call s:remove_config_value(s:cmake_config_build_config_key, 1)
+endfunction
+
+function! s:apply_switch_build_selection(selected_build) abort
+  call s:run_set_config_build_config(a:selected_build)
+  call s:remove_config_value(s:cmake_config_preset_key, 1)
 endfunction
 
 function! s:run_switch_target() abort
@@ -794,6 +869,9 @@ function! s:run_switch_target() abort
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   let l:current_target = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
+  if empty(l:current_target)
+    let l:current_target = s:cmake_switch_target_all_name
+  endif
   if empty(trim(l:output_value))
     let l:output_value = s:cmake_config_default_output
   endif
@@ -804,9 +882,14 @@ function! s:run_switch_target() abort
   endif
 
   let l:scan_directory = s:target_scan_directory(l:build_directory, l:preset_value)
-  let l:targets = s:available_targets(l:build_directory, l:preset_value)
+  let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
+        \ l:build_directory,
+        \ l:scan_directory,
+        \ l:preset_value)
+  let l:targets = s:available_targets(l:scan_directory, l:root_compile_commands_path)
+  call insert(l:targets, s:cmake_switch_target_all_name)
   if empty(l:targets)
-    throw 'No selectable targets found in directory: ' . l:scan_directory
+    throw 'No selectable targets found in file: ' . l:root_compile_commands_path
   endif
 
   if s:should_use_popup_menu_for_preset_selection()
@@ -992,6 +1075,16 @@ function! s:apply_switch_target_popup_selection(state, result) abort
 endfunction
 
 function! s:apply_switch_target_selection(selected_target, preset_value, build_directory, scan_directory) abort
+  if a:selected_target ==# s:cmake_switch_target_all_name
+    let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
+          \ a:build_directory,
+          \ a:scan_directory,
+          \ a:preset_value)
+    call s:copy_compile_commands_file(l:root_compile_commands_path, a:build_directory)
+    call s:remove_config_value(s:cmake_config_target_key, 1)
+    return
+  endif
+
   let l:target_directory = s:resolve_selected_target_directory(a:selected_target, a:scan_directory)
   let l:source_file_path = s:ensure_target_compile_commands(
         \ a:selected_target,
@@ -1003,60 +1096,70 @@ function! s:apply_switch_target_selection(selected_target, preset_value, build_d
   call s:set_config_value(s:cmake_config_target_key, a:selected_target, 1)
 endfunction
 
-function! s:available_targets(build_directory, preset_value) abort
-  if empty(trim(a:build_directory))
+function! s:available_targets(scan_directory, root_compile_commands_path) abort
+  if empty(trim(a:scan_directory))
     throw 'Build directory cannot be empty.'
   endif
+  if empty(trim(a:root_compile_commands_path))
+    throw 'Root compile_commands path cannot be empty.'
+  endif
 
-  let l:scan_directory = s:target_scan_directory(a:build_directory, a:preset_value)
-  let l:glob_pattern = s:path_join(s:path_join(l:scan_directory, '**'), '*.dir')
-  let l:directory_matches = glob(l:glob_pattern, 0, 1)
+  let l:entries = s:read_json_array(a:root_compile_commands_path)
+  let l:root_compile_commands_directory = s:normalize_full_path(fnamemodify(a:root_compile_commands_path, ':h'))
   let l:targets = []
   let l:seen = {}
 
-  for l:match in l:directory_matches
-    if !isdirectory(l:match)
+  for l:entry in l:entries
+    if type(l:entry) != v:t_dict
       continue
     endif
 
-    let l:normalized_match = s:normalize_full_path(l:match)
-    if !s:is_sub_path_of(l:normalized_match, l:scan_directory)
+    let l:working_directory = s:resolve_working_directory(
+          \ s:to_string_or_empty(get(l:entry, 'directory', '')),
+          \ l:root_compile_commands_directory)
+    let l:target_directory = s:infer_target_directory(
+          \ a:scan_directory,
+          \ l:working_directory,
+          \ s:to_string_or_empty(get(l:entry, 'output', '')),
+          \ get(l:entry, 'arguments', v:null),
+          \ s:to_string_or_empty(get(l:entry, 'command', '')))
+    if empty(l:target_directory)
       continue
     endif
 
-    let l:relative_path = s:relative_path(l:normalized_match, l:scan_directory)
-    let l:relative_path = substitute(l:relative_path, '\\', '/', 'g')
-    if l:relative_path !~# '\v(^|/)CMakeFiles/[^/]+\.dir$'
+    let l:target_name = s:target_name_from_directory(l:target_directory, a:scan_directory)
+    if empty(l:target_name)
       continue
     endif
 
-    let l:target_path = substitute(l:relative_path, '\.dir$', '', '')
-
-    if l:target_path =~# '^CMakeFiles/'
-      let l:target_path = strpart(l:target_path, strlen('CMakeFiles/'))
-    elseif l:target_path =~# '/CMakeFiles/'
-      let l:target_path = substitute(l:target_path, '^.\{-}/CMakeFiles/', '', '')
-    endif
-
-    if empty(trim(l:target_path))
+    if has_key(l:seen, l:target_name)
       continue
     endif
 
-    let l:target_path = substitute(l:target_path, '/\+', '/', 'g')
-    if empty(trim(l:target_path))
-      continue
-    endif
-
-    if has_key(l:seen, l:target_path)
-      continue
-    endif
-
-    let l:seen[l:target_path] = 1
-    call add(l:targets, l:target_path)
+    let l:seen[l:target_name] = 1
+    call add(l:targets, l:target_name)
   endfor
 
   call sort(l:targets)
   return l:targets
+endfunction
+
+function! s:target_name_from_directory(target_directory, scan_directory) abort
+  let l:normalized_target_directory = s:normalize_full_path(a:target_directory)
+  if !s:is_sub_path_of(l:normalized_target_directory, a:scan_directory)
+    return ''
+  endif
+
+  let l:relative_target_directory = substitute(
+        \ s:relative_path(l:normalized_target_directory, a:scan_directory),
+        \ '\\',
+        \ '/',
+        \ 'g')
+  if l:relative_target_directory !~# '\v(^|/)CMakeFiles/[^/]+\.dir$'
+    return ''
+  endif
+
+  return substitute(fnamemodify(l:relative_target_directory, ':t'), '\.dir$', '', '')
 endfunction
 
 function! s:target_scan_directory(build_directory, preset_value) abort
@@ -1069,8 +1172,7 @@ function! s:target_scan_directory(build_directory, preset_value) abort
     return a:build_directory
   endif
 
-  let l:preset_directory = s:resolve_path(l:preset_value, a:build_directory)
-  return isdirectory(l:preset_directory) ? l:preset_directory : a:build_directory
+  return s:resolve_path(l:preset_value, a:build_directory)
 endfunction
 
 function! s:resolve_selected_target_directory(target_name, scan_directory) abort
@@ -1127,16 +1229,6 @@ function! s:resolve_selected_target_directory(target_name, scan_directory) abort
   return l:directories[0]
 endfunction
 
-function! s:add_root_compile_commands_candidate(candidates, seen, directory) abort
-  let l:candidate = s:normalize_full_path(s:path_join(a:directory, s:default_input_filename))
-  if has_key(a:seen, l:candidate)
-    return
-  endif
-
-  let a:seen[l:candidate] = 1
-  call add(a:candidates, l:candidate)
-endfunction
-
 function! s:resolve_root_compile_commands_path(build_directory, scan_directory, preset_value) abort
   if empty(trim(a:build_directory))
     throw 'Build directory cannot be empty.'
@@ -1145,31 +1237,12 @@ function! s:resolve_root_compile_commands_path(build_directory, scan_directory, 
     throw 'Build directory cannot be empty.'
   endif
 
-  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
-  let l:candidates = []
-  let l:seen = {}
-  if empty(l:preset_value)
-    call s:add_root_compile_commands_candidate(l:candidates, l:seen, a:scan_directory)
-    if !s:path_equals(a:scan_directory, a:build_directory)
-      call s:add_root_compile_commands_candidate(l:candidates, l:seen, a:build_directory)
-    endif
-  else
-    let l:preset_directory = s:resolve_path(l:preset_value, a:build_directory)
-    call s:add_root_compile_commands_candidate(l:candidates, l:seen, l:preset_directory)
-    call s:add_root_compile_commands_candidate(l:candidates, l:seen, a:build_directory)
+  let l:candidate = s:normalize_full_path(s:path_join(a:scan_directory, s:default_input_filename))
+  if filereadable(l:candidate)
+    return l:candidate
   endif
 
-  for l:candidate in l:candidates
-    if filereadable(l:candidate)
-      return l:candidate
-    endif
-  endfor
-
-  if len(l:candidates) == 1
-    throw 'Root ' . s:default_input_filename . ' not found at: ' . l:candidates[0]
-  endif
-
-  throw 'Root ' . s:default_input_filename . ' not found at: ' . join(l:candidates, ' or ')
+  throw 'Root ' . s:default_input_filename . ' not found at: ' . l:candidate
 endfunction
 
 function! s:ensure_target_compile_commands(target_name, target_directory, preset_value, build_directory, scan_directory) abort
@@ -1850,6 +1923,26 @@ function! s:set_config_value(key, value, ...) abort
   call s:write_json_file(l:config_path, l:config)
 
   call s:write_info('Set ' . a:key . ' "' . a:value . '" in ' . s:relative_path(l:config_path, l:config_root))
+endfunction
+
+function! s:remove_config_value(key, ...) abort
+  let l:require_existing = get(a:000, 0, 0)
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:config_path = l:require_existing
+        \ ? s:resolve_existing_local_config_path(l:working_directory)
+        \ : s:cmake_config_path(l:working_directory)
+  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+  let l:config = filereadable(l:config_path)
+        \ ? s:read_json_object(l:config_path)
+        \ : s:default_cmake_config_payload()
+
+  if has_key(l:config, a:key)
+    call remove(l:config, a:key)
+  endif
+  call mkdir(fnamemodify(l:config_path, ':h'), 'p')
+  call s:write_json_file(l:config_path, l:config)
+
+  call s:write_info('Removed ' . a:key . ' from ' . s:relative_path(l:config_path, l:config_root))
 endfunction
 
 function! s:apply_default_cmake_config_values(config) abort
