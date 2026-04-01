@@ -18,6 +18,7 @@ let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
+let s:build_terminal_max_height = 10
 let s:switch_target_popup_states = {}
 let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:last_cmake_build_window_id = -1
@@ -2135,6 +2136,17 @@ function! s:run_shell_command(argv) abort
   return l:output
 endfunction
 
+function! s:build_terminal_max_allowed_height(main_window_height) abort
+  let l:main_window_height = type(a:main_window_height) == v:t_number
+        \ ? a:main_window_height
+        \ : str2nr(s:to_string_or_empty(a:main_window_height))
+  if l:main_window_height <= 0
+    let l:main_window_height = winheight(0)
+  endif
+
+  return max([1, min([s:build_terminal_max_height, l:main_window_height / 2])])
+endfunction
+
 function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   if empty(a:argv)
     throw 'Command arguments cannot be empty.'
@@ -2158,16 +2170,21 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
+  let l:origin_window_id = win_getid()
+  let l:main_window_height = winheight(0)
+  let l:terminal_max_height = l:split_orientation ==# 'horizontal'
+        \ ? s:build_terminal_max_allowed_height(l:main_window_height)
+        \ : 0
   let l:terminal_command_options = {
         \ 'terminal_name': l:terminal_name,
         \ 'success_terminal_name': l:success_terminal_name,
         \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix,
-        \ 'on_success_callback': l:OnSuccessCallback
+        \ 'on_success_callback': l:OnSuccessCallback,
+        \ 'max_height': l:terminal_max_height
         \ }
-  let l:origin_window_id = win_getid()
   let l:terminal = l:reuse_previous_build_window
-        \ ? s:open_previous_build_terminal_window_or_recreate(l:split_orientation)
-        \ : s:open_new_build_terminal_window(l:split_orientation)
+        \ ? s:open_previous_build_terminal_window_or_recreate(l:split_orientation, l:terminal_max_height)
+        \ : s:open_new_build_terminal_window(l:split_orientation, l:terminal_max_height)
 
   try
     try
@@ -2178,7 +2195,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         throw l:error_message
       endif
 
-      let l:terminal = s:replace_build_terminal_window(l:terminal.window_id, l:split_orientation)
+      let l:terminal = s:replace_build_terminal_window(l:terminal.window_id, l:split_orientation, l:terminal_max_height)
       call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id, l:terminal_command_options)
     endtry
 
@@ -2193,7 +2210,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endtry
 endfunction
 
-function! s:open_previous_build_terminal_window_or_recreate(split_orientation) abort
+function! s:open_previous_build_terminal_window_or_recreate(split_orientation, max_height) abort
   let l:split_orientation = tolower(trim(s:to_string_or_empty(a:split_orientation)))
   if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
     throw 'Split orientation must be "vertical" or "horizontal".'
@@ -2201,26 +2218,36 @@ function! s:open_previous_build_terminal_window_or_recreate(split_orientation) a
 
   let l:previous_terminal = s:previous_build_terminal_window()
   if empty(l:previous_terminal)
-    return s:open_new_build_terminal_window(l:split_orientation)
+    return s:open_new_build_terminal_window(l:split_orientation, a:max_height)
   endif
 
   if get(l:previous_terminal, 'split_orientation', 'vertical') !=# l:split_orientation
-    return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation)
+    return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation, a:max_height)
   endif
 
   if s:is_previous_build_terminal_window_reusable(l:previous_terminal)
     if win_gotoid(l:previous_terminal.window_id)
+      if l:split_orientation ==# 'horizontal'
+        execute 'silent resize ' . max([1, a:max_height])
+      endif
       let l:previous_terminal.reused_existing_window = 1
       return l:previous_terminal
     endif
   endif
 
-  return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation)
+  return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation, a:max_height)
 endfunction
 
-function! s:open_new_build_terminal_window(split_orientation) abort
+function! s:open_new_build_terminal_window(split_orientation, max_height) abort
+  let l:max_height = type(a:max_height) == v:t_number
+        \ ? a:max_height
+        \ : str2nr(s:to_string_or_empty(a:max_height))
+  if l:max_height <= 0
+    let l:max_height = s:build_terminal_max_allowed_height(winheight(0))
+  endif
+
   if a:split_orientation ==# 'horizontal'
-    execute 'silent keepalt botright new'
+    execute 'silent keepalt botright ' . l:max_height . 'new'
   else
     execute 'silent keepalt vertical botright new'
   endif
@@ -2234,15 +2261,15 @@ function! s:open_new_build_terminal_window(split_orientation) abort
         \ }
 endfunction
 
-function! s:replace_build_terminal_window(window_id, split_orientation) abort
+function! s:replace_build_terminal_window(window_id, split_orientation, max_height) abort
   if win_id2win(a:window_id) <= 0
-    return s:open_new_build_terminal_window(a:split_orientation)
+    return s:open_new_build_terminal_window(a:split_orientation, a:max_height)
   endif
 
   call win_gotoid(a:window_id)
   let l:old_window_id = a:window_id
   let l:old_buffer_number = bufnr('%')
-  let l:new_terminal = s:open_new_build_terminal_window(a:split_orientation)
+  let l:new_terminal = s:open_new_build_terminal_window(a:split_orientation, a:max_height)
   if win_id2win(l:old_window_id) > 0
     call win_gotoid(l:old_window_id)
     execute 'silent! close!'
@@ -2420,6 +2447,10 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
+  let l:max_height = get(l:options, 'max_height', 0)
+  if type(l:max_height) != v:t_number
+    let l:max_height = str2nr(s:to_string_or_empty(l:max_height))
+  endif
 
   let l:term_options = {'curwin': 1}
   if !s:should_capture_build_terminal_for_tests()
@@ -2428,14 +2459,33 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
           \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:OnSuccessCallback])
   endif
 
-  let l:job = term_start(copy(a:argv), l:term_options)
+  let l:term_start_options = copy(l:term_options)
+  if !empty(l:terminal_name)
+    let l:term_start_options.term_name = l:terminal_name
+  endif
+
+  try
+    let l:job = term_start(copy(a:argv), l:term_start_options)
+  catch /^Vim\%((\a\+)\)\=:E475:/
+    if !has_key(l:term_start_options, 'term_name')
+      throw v:exception
+    endif
+
+    call remove(l:term_start_options, 'term_name')
+    let l:job = term_start(copy(a:argv), l:term_start_options)
+  endtry
   if type(l:job) != v:t_number || l:job <= 0
     throw 'Failed to start build command in terminal window.'
   endif
 
   let l:terminal_buffer_number = bufnr('%')
   let b:vim_cmake_naive_build_terminal = 1
-  call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
+  if l:max_height > 0
+    let b:vim_cmake_naive_build_terminal_max_height = l:max_height
+  else
+    unlet! b:vim_cmake_naive_build_terminal_max_height
+  endif
+  call s:set_running_terminal_name(a:window_id, l:terminal_name, l:terminal_buffer_number)
   call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
@@ -2455,6 +2505,23 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
       call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
     endif
   endif
+endfunction
+
+function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) abort
+  let l:terminal_name = trim(s:to_string_or_empty(a:terminal_name))
+  if empty(l:terminal_name)
+    return
+  endif
+
+  call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
+  if a:buffer_number <= 0 || !bufexists(a:buffer_number) || bufname(a:buffer_number) ==# l:terminal_name
+    return
+  endif
+
+  if exists('*term_wait') && s:is_terminal_buffer_job_running(a:buffer_number)
+    call term_wait(a:buffer_number, 10)
+  endif
+  call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
 endfunction
 
 function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, OnSuccessCallback, job, status) abort
@@ -2603,6 +2670,7 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
 
   let l:window_number = win_id2win(a:window_id)
   let l:window_width = l:window_number > 0 ? winwidth(l:window_number) : 0
+  let l:window_height = l:window_number > 0 ? winheight(l:window_number) : 0
   let l:current_window_number = winnr()
   let l:is_vertical_split = winnr('h') != l:current_window_number
         \ || winnr('l') != l:current_window_number
@@ -2611,9 +2679,14 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
   let l:is_valid_buffer = a:buffer_number > 0 && bufexists(a:buffer_number)
   let l:is_terminal = l:is_valid_buffer && getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal'
   let l:buffer_name = l:is_valid_buffer ? bufname(a:buffer_number) : ''
+  let l:max_height = l:is_valid_buffer
+        \ ? getbufvar(a:buffer_number, 'vim_cmake_naive_build_terminal_max_height', 0)
+        \ : 0
   let g:vim_cmake_naive_test_last_build_terminal = {
         \ 'winid': a:window_id,
         \ 'width': l:window_width,
+        \ 'height': l:window_height,
+        \ 'max_height': l:max_height,
         \ 'window_count': winnr('$'),
         \ 'is_vertical_split': l:is_vertical_split,
         \ 'is_horizontal_split': l:is_horizontal_split,

@@ -80,6 +80,7 @@ This command:
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
 - opens a horizontal split terminal and starts generate there asynchronously
+- limits generate terminal height to at most 10 lines and never more than half of the main window height
 - sets terminal status name while running to:
   - `cmake generate --preset=<preset>` when preset is set
   - `cmake generate` when preset is empty
@@ -104,6 +105,7 @@ This command:
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
 - opens a horizontal split terminal and starts the build there asynchronously
+- limits build terminal height to at most 10 lines and never more than half of the main window height
 - sets terminal status name while running to:
   - `cmake build --preset=<preset> --target=<target>` when preset and target are set
   - `cmake build --target=all` when target is empty
