@@ -4,6 +4,8 @@
    plugins.
 2. All work must be done in boundries of the repository directory. Never create
    scripts or files outside of repository directory.
+3. All errors and warnings must be issues throught the Vim build-in errors and
+   warnings functionality.
 
 # Popup Rules
 

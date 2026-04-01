@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides thirteen commands:
+It provides fourteen commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -14,6 +14,7 @@ It provides thirteen commands:
 - `:CMakeSwitchTarget`
 - `:CMakeGenerate`
 - `:CMakeBuild`
+- `:CMakeClose`
 - `:CMakeInfo`
 - `:CMakeMenu`
 - `:CMakeMenuFull`
@@ -78,7 +79,11 @@ This command:
   - adds `--fresh` to force clean cache regeneration
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
-- opens a vertical split terminal and starts generate there asynchronously
+- opens a horizontal split terminal and starts generate there asynchronously
+- sets terminal status name while running to:
+  - `cmake generate --preset=<preset>` when preset is set
+  - `cmake generate` when preset is empty
+- renames terminal status name on completion to `Success` or `Failure (<code>)`
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
 - extracts discovered targets and stores them to `.vim/.cmake/cache.json` field `targets`
 - splits root `compile_commands.json` into target-local `compile_commands.json` files under corresponding target directories
@@ -98,7 +103,7 @@ This command:
 - runs `cmake --build <output>`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
-- opens a vertical split terminal and starts the build there asynchronously
+- opens a horizontal split terminal and starts the build there asynchronously
 - sets terminal status name while running to:
   - `cmake build --preset=<preset> --target=<target>` when preset and target are set
   - `cmake build --target=all` when target is empty
@@ -106,6 +111,17 @@ This command:
 - renames terminal status name on completion to `Success` or `Failure (<code>)`
 - reuses previously opened visible build output window when possible; otherwise recreates it
 - returns immediately; build completion and failures are reported in that terminal/messages
+
+Close CMake terminal windows spawned by generate/build:
+
+```vim
+:CMakeClose
+```
+
+This command:
+- closes visible terminal windows created by `:CMakeGenerate` or `:CMakeBuild`
+- closes hidden terminal buffers created by this plugin
+- resets internal terminal reuse state for subsequent build/generate commands
 
 Show local CMake configuration in popup table:
 
@@ -127,7 +143,7 @@ Open a compact popup command menu for common CMake commands:
 ```
 
 This command:
-- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeSwitchPreset`, `CMakeSwitchBuild`, `CMakeSwitchTarget`
+- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeClose`, `CMakeSwitchPreset`, `CMakeSwitchBuild`, `CMakeSwitchTarget`
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - executes the selected command
 
@@ -173,9 +189,11 @@ Switch local CMake build type:
 
 This command:
 - reads nearest existing `.vim/.cmake/.config.json`
+- always includes predefined build option `(none)`
 - always lists default build types: `Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`
 - prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetBuild`
 - removes `preset` key from local config after applying selected build type
+- when `none` is selected, removes `build` key from local config
 - popup entries are ordered and prefixed with a number
 - currently selected build type is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors

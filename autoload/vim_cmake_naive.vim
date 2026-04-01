@@ -10,7 +10,9 @@ let s:cmake_config_target_key = 'target'
 let s:cmake_config_default_build = 'Debug'
 let s:cmake_config_default_output = 'build'
 let s:cmake_switch_preset_none_name = 'none'
+let s:cmake_switch_build_none_name = 'none'
 let s:cmake_switch_target_all_name = 'all'
+let s:cmake_switch_target_missing_cache_error = 'No cache found. Please run CMakeGenerate command first.'
 let s:cmake_switch_build_default_types = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel']
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
@@ -20,6 +22,7 @@ let s:switch_target_popup_states = {}
 let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:last_cmake_build_window_id = -1
 let s:last_cmake_build_buffer_number = -1
+let s:last_cmake_build_split_orientation = 'vertical'
 let s:running_cmake_command_name = ''
 let s:cmake_menu_prompt = 'Select CMake command'
 let s:cmake_menu_full_command_specs = [
@@ -30,6 +33,7 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0},
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeClose', 'needs_args': 0},
       \ {'name': 'CMakeInfo', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
       \ {'name': 'CMakeMenuFull', 'needs_args': 0},
@@ -40,6 +44,7 @@ let s:cmake_menu_full_command_specs = [
 let s:cmake_menu_compact_command_specs = [
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeClose', 'needs_args': 0},
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
       \ {'name': 'CMakeSwitchBuild', 'needs_args': 0},
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0}
@@ -113,7 +118,12 @@ function! vim_cmake_naive#switch_target() abort
   try
     call s:run_cmake_command('CMakeSwitchTarget', function('s:run_switch_target'), [])
   catch
-    call s:write_error(s:format_exception(v:exception))
+    let l:message = s:format_exception(v:exception)
+    if l:message ==# s:cmake_switch_target_missing_cache_error
+      call s:write_builtin_error(l:message)
+      return
+    endif
+    call s:write_error(l:message)
   endtry
 endfunction
 
@@ -160,6 +170,14 @@ endfunction
 function! vim_cmake_naive#build() abort
   try
     call s:run_cmake_command('CMakeBuild', function('s:run_build'), [])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#close() abort
+  try
+    call s:run_cmake_command('CMakeClose', function('s:run_close'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -581,6 +599,10 @@ function! s:run_switch_build() abort
   let l:selection_prompt = 'Select CMake build'
   let l:current_build = s:current_config_build_for_switch(l:working_directory)
   let l:available_builds = copy(s:cmake_switch_build_default_types)
+  call insert(l:available_builds, s:cmake_switch_build_none_name)
+  if empty(l:current_build)
+    let l:current_build = s:cmake_switch_build_none_name
+  endif
 
   if s:should_use_popup_menu_for_preset_selection()
     call s:show_switch_build_popup(l:selection_prompt, l:available_builds, l:current_build)
@@ -719,14 +741,13 @@ function! s:current_config_build_for_switch(start_directory) abort
   catch
     let l:message = s:format_exception(v:exception)
     if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0
-      return s:cmake_config_default_build
+      return ''
     endif
     throw l:message
   endtry
 
   let l:config = s:read_json_object(l:config_path)
-  let l:build = trim(s:to_string_or_empty(get(l:config, s:cmake_config_build_config_key, '')))
-  return empty(l:build) ? s:cmake_config_default_build : l:build
+  return trim(s:to_string_or_empty(get(l:config, s:cmake_config_build_config_key, '')))
 endfunction
 
 function! s:should_use_popup_menu_for_preset_selection() abort
@@ -816,7 +837,10 @@ function! s:on_switch_preset_popup_selection(items, _popup_id, result) abort
 endfunction
 
 function! s:show_switch_build_popup(prompt, items, current_build) abort
-  let l:display_items = s:preset_popup_display_items(a:items, a:current_build)
+  let l:display_items = s:preset_popup_display_items(
+        \ a:items,
+        \ a:current_build,
+        \ {s:cmake_switch_build_none_name: '(' . s:cmake_switch_build_none_name . ')'})
   let l:popup_options = s:switch_build_popup_options(a:prompt, a:items)
   if exists('g:vim_cmake_naive_test_popup_menu_response')
     let g:vim_cmake_naive_test_last_build_popup_items = copy(l:display_items)
@@ -862,6 +886,11 @@ function! s:apply_switch_preset_selection(selected_preset) abort
 endfunction
 
 function! s:apply_switch_build_selection(selected_build) abort
+  if a:selected_build ==# s:cmake_switch_build_none_name
+    call s:remove_config_value(s:cmake_config_build_config_key, 1)
+    return
+  endif
+
   call s:run_set_config_build_config(a:selected_build)
   call s:remove_config_value(s:cmake_config_preset_key, 1)
 endfunction
@@ -1100,7 +1129,7 @@ function! s:cached_targets_for_switch(config_path) abort
 
   let l:cache_path = s:cmake_cache_path(a:config_path)
   if !filereadable(l:cache_path)
-    throw 'No cache found. Please run CMakeGenerate command first.'
+    throw s:cmake_switch_target_missing_cache_error
   endif
 
   let l:cache_payload = s:read_json_object(l:cache_path)
@@ -1184,6 +1213,9 @@ function! s:target_name_from_directory(target_directory, scan_directory) abort
         \ '\\',
         \ '/',
         \ 'g')
+  if l:relative_target_directory =~# '\v(^|/)_deps(/|$)'
+    return ''
+  endif
   if l:relative_target_directory !~# '\v(^|/)CMakeFiles/[^/]+\.dir$'
     return ''
   endif
@@ -1805,6 +1837,7 @@ function! s:run_generate() abort
     call add(l:argv, l:preset_value)
   endif
 
+  let l:generate_terminal_name = s:cmake_generate_terminal_running_name(l:preset_value)
   let l:generate_completion_context = {
         \ 'config_path': l:config_path,
         \ 'project_root': l:project_root,
@@ -1813,6 +1846,10 @@ function! s:run_generate() abort
         \ }
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
+        \ 'split_orientation': 'horizontal',
+        \ 'terminal_name': l:generate_terminal_name,
+        \ 'success_terminal_name': 'Success',
+        \ 'failure_terminal_name_prefix': 'Failure',
         \ 'on_success_callback': function('s:on_generate_command_success', [copy(l:generate_completion_context)])
         \ })
   call s:write_info('Started generate in ' . s:relative_path(l:generation_directory, l:project_root))
@@ -1913,11 +1950,34 @@ function! s:run_build() abort
   let l:build_terminal_name = s:cmake_build_terminal_running_name(l:preset_value, l:target_value)
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
+        \ 'split_orientation': 'horizontal',
         \ 'terminal_name': l:build_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure'
         \ })
   call s:write_info('Started build in ' . s:relative_path(l:build_directory, l:project_root))
+endfunction
+
+function! s:run_close() abort
+  let l:closed_window_count = s:close_build_terminal_windows()
+  let l:closed_buffer_count = s:close_build_terminal_hidden_buffers()
+  call s:reset_previous_build_terminal_window()
+  call s:write_info(
+        \ 'Closed build terminals: '
+        \ . l:closed_window_count
+        \ . ' windows, '
+        \ . l:closed_buffer_count
+        \ . ' hidden buffers.')
+endfunction
+
+function! s:cmake_generate_terminal_running_name(preset_value) abort
+  let l:name_parts = ['cmake', 'generate']
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  if !empty(l:preset_value)
+    call add(l:name_parts, '--preset=' . l:preset_value)
+  endif
+
+  return join(l:name_parts, ' ')
 endfunction
 
 function! s:cmake_build_terminal_running_name(preset_value, target_value) abort
@@ -2090,6 +2150,10 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endif
 
   let l:reuse_previous_build_window = s:as_condition_bool(get(l:options, 'reuse_previous_build_window', 0))
+  let l:split_orientation = tolower(trim(s:to_string_or_empty(get(l:options, 'split_orientation', 'vertical'))))
+  if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
+    throw 'Split orientation must be "vertical" or "horizontal".'
+  endif
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
@@ -2102,8 +2166,8 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ }
   let l:origin_window_id = win_getid()
   let l:terminal = l:reuse_previous_build_window
-        \ ? s:open_previous_build_terminal_window_or_recreate()
-        \ : s:open_new_build_terminal_window()
+        \ ? s:open_previous_build_terminal_window_or_recreate(l:split_orientation)
+        \ : s:open_new_build_terminal_window(l:split_orientation)
 
   try
     try
@@ -2114,7 +2178,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         throw l:error_message
       endif
 
-      let l:terminal = s:replace_build_terminal_window(l:terminal.window_id)
+      let l:terminal = s:replace_build_terminal_window(l:terminal.window_id, l:split_orientation)
       call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id, l:terminal_command_options)
     endtry
 
@@ -2129,10 +2193,19 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endtry
 endfunction
 
-function! s:open_previous_build_terminal_window_or_recreate() abort
+function! s:open_previous_build_terminal_window_or_recreate(split_orientation) abort
+  let l:split_orientation = tolower(trim(s:to_string_or_empty(a:split_orientation)))
+  if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
+    throw 'Split orientation must be "vertical" or "horizontal".'
+  endif
+
   let l:previous_terminal = s:previous_build_terminal_window()
   if empty(l:previous_terminal)
-    return s:open_new_build_terminal_window()
+    return s:open_new_build_terminal_window(l:split_orientation)
+  endif
+
+  if get(l:previous_terminal, 'split_orientation', 'vertical') !=# l:split_orientation
+    return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation)
   endif
 
   if s:is_previous_build_terminal_window_reusable(l:previous_terminal)
@@ -2142,29 +2215,34 @@ function! s:open_previous_build_terminal_window_or_recreate() abort
     endif
   endif
 
-  return s:replace_build_terminal_window(l:previous_terminal.window_id)
+  return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation)
 endfunction
 
-function! s:open_new_build_terminal_window() abort
-  execute 'silent keepalt vertical botright new'
+function! s:open_new_build_terminal_window(split_orientation) abort
+  if a:split_orientation ==# 'horizontal'
+    execute 'silent keepalt botright new'
+  else
+    execute 'silent keepalt vertical botright new'
+  endif
   execute 'silent file ' . fnameescape(s:build_terminal_buffer_name)
   let b:vim_cmake_naive_build_terminal = 1
   return {
         \ 'window_id': win_getid(),
         \ 'buffer_number': bufnr('%'),
+        \ 'split_orientation': a:split_orientation,
         \ 'reused_existing_window': 0
         \ }
 endfunction
 
-function! s:replace_build_terminal_window(window_id) abort
+function! s:replace_build_terminal_window(window_id, split_orientation) abort
   if win_id2win(a:window_id) <= 0
-    return s:open_new_build_terminal_window()
+    return s:open_new_build_terminal_window(a:split_orientation)
   endif
 
   call win_gotoid(a:window_id)
   let l:old_window_id = a:window_id
   let l:old_buffer_number = bufnr('%')
-  let l:new_terminal = s:open_new_build_terminal_window()
+  let l:new_terminal = s:open_new_build_terminal_window(a:split_orientation)
   if win_id2win(l:old_window_id) > 0
     call win_gotoid(l:old_window_id)
     execute 'silent! close!'
@@ -2182,8 +2260,13 @@ function! s:replace_build_terminal_window(window_id) abort
 endfunction
 
 function! s:remember_previous_build_terminal_window(terminal) abort
+  let l:split_orientation = tolower(trim(s:to_string_or_empty(get(a:terminal, 'split_orientation', 'vertical'))))
+  if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
+    let l:split_orientation = 'vertical'
+  endif
   let s:last_cmake_build_window_id = get(a:terminal, 'window_id', -1)
   let s:last_cmake_build_buffer_number = get(a:terminal, 'buffer_number', -1)
+  let s:last_cmake_build_split_orientation = l:split_orientation
 endfunction
 
 function! s:previous_build_terminal_window() abort
@@ -2205,7 +2288,16 @@ function! s:previous_build_terminal_window() abort
     return {}
   endif
 
-  return {'window_id': s:last_cmake_build_window_id, 'buffer_number': l:buffer_number}
+  let l:split_orientation = tolower(trim(s:to_string_or_empty(s:last_cmake_build_split_orientation)))
+  if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
+    let l:split_orientation = 'vertical'
+  endif
+
+  return {
+        \ 'window_id': s:last_cmake_build_window_id,
+        \ 'buffer_number': l:buffer_number,
+        \ 'split_orientation': l:split_orientation
+        \ }
 endfunction
 
 function! s:is_previous_build_terminal_window_reusable(terminal) abort
@@ -2216,6 +2308,87 @@ function! s:is_previous_build_terminal_window_reusable(terminal) abort
   endif
 
   return !s:is_terminal_buffer_job_running(l:buffer_number)
+endfunction
+
+function! s:close_build_terminal_windows() abort
+  let l:window_ids = s:build_terminal_window_ids()
+  let l:closed_window_count = 0
+  let l:origin_window_id = win_getid()
+
+  for l:window_id in l:window_ids
+    if win_id2win(l:window_id) <= 0
+      continue
+    endif
+
+    if win_gotoid(l:window_id)
+      let l:buffer_number = bufnr('%')
+      execute 'silent! close!'
+      if l:buffer_number > 0 && bufexists(l:buffer_number)
+        execute 'silent! bwipeout! ' . l:buffer_number
+      endif
+      if win_id2win(l:window_id) <= 0
+        let l:closed_window_count += 1
+      endif
+    endif
+  endfor
+
+  if win_id2win(l:origin_window_id) > 0
+    call win_gotoid(l:origin_window_id)
+  endif
+
+  return l:closed_window_count
+endfunction
+
+function! s:close_build_terminal_hidden_buffers() abort
+  let l:closed_buffer_count = 0
+  for l:buffer_info in getbufinfo()
+    let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
+    if l:buffer_number <= 0
+          \ || !bufexists(l:buffer_number)
+          \ || getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+          \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+          \ || bufwinnr(l:buffer_number) >= 0
+      continue
+    endif
+
+    execute 'silent! bwipeout! ' . l:buffer_number
+    if !bufexists(l:buffer_number)
+      let l:closed_buffer_count += 1
+    endif
+  endfor
+
+  return l:closed_buffer_count
+endfunction
+
+function! s:build_terminal_window_ids() abort
+  let l:window_ids = []
+  let l:seen = {}
+  if !exists('*getwininfo')
+    return l:window_ids
+  endif
+
+  for l:window_info in getwininfo()
+    let l:window_id = get(l:window_info, 'winid', 0)
+    let l:buffer_number = get(l:window_info, 'bufnr', -1)
+    if l:window_id <= 0
+          \ || l:buffer_number <= 0
+          \ || has_key(l:seen, l:window_id)
+          \ || getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+          \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+      continue
+    endif
+
+    let l:seen[l:window_id] = 1
+    call add(l:window_ids, l:window_id)
+  endfor
+
+  return l:window_ids
+endfunction
+
+function! s:reset_previous_build_terminal_window() abort
+  let s:last_cmake_build_window_id = -1
+  let s:last_cmake_build_buffer_number = -1
+  let s:last_cmake_build_split_orientation = 'vertical'
 endfunction
 
 function! s:is_terminal_buffer_job_running(buffer_number) abort
@@ -2261,6 +2434,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 
   let l:terminal_buffer_number = bufnr('%')
+  let b:vim_cmake_naive_build_terminal = 1
   call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
   call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   if s:should_capture_build_terminal_for_tests()
@@ -2432,6 +2606,8 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
   let l:current_window_number = winnr()
   let l:is_vertical_split = winnr('h') != l:current_window_number
         \ || winnr('l') != l:current_window_number
+  let l:is_horizontal_split = winnr('k') != l:current_window_number
+        \ || winnr('j') != l:current_window_number
   let l:is_valid_buffer = a:buffer_number > 0 && bufexists(a:buffer_number)
   let l:is_terminal = l:is_valid_buffer && getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal'
   let l:buffer_name = l:is_valid_buffer ? bufname(a:buffer_number) : ''
@@ -2440,6 +2616,7 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
         \ 'width': l:window_width,
         \ 'window_count': winnr('$'),
         \ 'is_vertical_split': l:is_vertical_split,
+        \ 'is_horizontal_split': l:is_horizontal_split,
         \ 'is_terminal': l:is_terminal,
         \ 'buffer_name': l:buffer_name,
         \ 'lines': s:build_terminal_non_empty_lines(a:buffer_number)
@@ -2912,6 +3089,16 @@ function! s:write_error(message) abort
   echohl ErrorMsg
   echom '[vim-cmake-naive] ' . a:message
   echohl None
+endfunction
+
+function! s:write_builtin_error(message) abort
+  let l:full_message = '[vim-cmake-naive] ' . a:message
+  try
+    execute 'echoerr ' . string(l:full_message)
+  catch /^Vim(echoerr):/
+    call s:write_error(a:message)
+  endtry
+  let v:errmsg = l:full_message
 endfunction
 
 function! s:format_exception(exception_text) abort
