@@ -61,6 +61,17 @@ directory), with:
 
 If no `CMakeLists.txt` is found, the command reports an error.
 
+On plugin startup, if local config `.vim/.cmake/.config.json` exists in current
+directory or parent directories, all config keys are exported to Vim process
+environment variables with `VIM_NAIVE_CMAKE_` prefix (uppercase key names;
+non-alphanumeric characters converted to `_`).
+
+Whenever plugin commands update local config (`:CMakeConfig`,
+`:CMakeConfigDefault`, `:CMakeConfigSet*`, `:CMakeSwitch*`, and default config
+creation inside `:CMakeGenerate`/`:CMakeBuild`), these environment variables are
+resynced immediately in Vim process. Removed config keys are removed from
+`VIM_NAIVE_CMAKE_*` environment as well.
+
 Generate CMake build system from local config:
 
 ```vim
@@ -238,6 +249,7 @@ Set the local CMake preset in `.vim/.cmake/.config.json`:
 This updates the nearest existing `.vim/.cmake/.config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
+It also updates `VIM_NAIVE_CMAKE_PRESET` in Vim process environment.
 
 Set local CMake build config in `.vim/.cmake/.config.json`:
 
@@ -249,6 +261,7 @@ Set local CMake build config in `.vim/.cmake/.config.json`:
 This updates the nearest existing `.vim/.cmake/.config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
+It also updates `VIM_NAIVE_CMAKE_BUILD` in Vim process environment.
 
 Set local CMake output in `.vim/.cmake/.config.json`:
 
@@ -260,6 +273,7 @@ Set local CMake output in `.vim/.cmake/.config.json`:
 This updates the nearest existing `.vim/.cmake/.config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
+It also updates `VIM_NAIVE_CMAKE_OUTPUT` in Vim process environment.
 
 ## Notes
 
