@@ -1,8 +1,8 @@
 let s:default_input_filename = 'compile_commands.json'
 let s:default_output_filename = 'compile_commands.json'
-let s:cmake_config_relative_path = '.vim/.cmake/.config.json'
+let s:cmake_config_filename = '.vim-cmake-naive-config.json'
 let s:cmake_presets_filename = 'CMakePresets.json'
-let s:cmake_cache_filename = 'cache.json'
+let s:cmake_cache_filename = '.vim-cmake-naive-cache.json'
 let s:cmake_config_preset_key = 'preset'
 let s:cmake_config_build_config_key = 'build'
 let s:cmake_config_output_key = 'output'
@@ -26,6 +26,8 @@ let s:last_cmake_build_window_id = -1
 let s:last_cmake_build_buffer_number = -1
 let s:last_cmake_build_split_orientation = 'vertical'
 let s:running_cmake_command_name = ''
+let s:cmake_missing_local_config_error =
+      \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
 let s:cmake_menu_prompt = 'Select CMake command'
 let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
@@ -35,17 +37,17 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0},
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeTest', 'needs_args': 0},
       \ {'name': 'CMakeClose', 'needs_args': 0},
       \ {'name': 'CMakeInfo', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
       \ {'name': 'CMakeMenuFull', 'needs_args': 0},
-      \ {'name': 'CMakeConfigSetPreset', 'needs_args': 1},
-      \ {'name': 'CMakeConfigSetBuild', 'needs_args': 1},
       \ {'name': 'CMakeConfigSetOutput', 'needs_args': 1}
       \ ]
 let s:cmake_menu_compact_command_specs = [
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeTest', 'needs_args': 0},
       \ {'name': 'CMakeClose', 'needs_args': 0},
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
       \ {'name': 'CMakeSwitchBuild', 'needs_args': 0},
@@ -177,6 +179,14 @@ function! vim_cmake_naive#build() abort
   endtry
 endfunction
 
+function! vim_cmake_naive#test() abort
+  try
+    call s:run_cmake_command('CMakeTest', function('s:run_test'), [])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
 function! vim_cmake_naive#close() abort
   try
     call s:run_cmake_command('CMakeClose', function('s:run_close'), [])
@@ -242,7 +252,7 @@ function! s:run_info() abort
     let l:config = s:read_json_object(l:config_path)
   catch
     let l:message = s:format_exception(v:exception)
-    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') < 0
+    if stridx(l:message, s:cmake_missing_local_config_error) < 0
       throw l:message
     endif
     let l:config_exists = 0
@@ -252,7 +262,7 @@ function! s:run_info() abort
     let l:display_lines = ['No configuration, please use CMakeConfigDefault to get started']
   else
     let l:display_lines = s:config_table_lines(l:config)
-    let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+    let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
     let l:title = l:title . ' [' . s:relative_path(l:config_path, l:config_root) . ']'
   endif
 
@@ -737,7 +747,7 @@ function! s:current_config_preset_for_switch(start_directory) abort
     let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
   catch
     let l:message = s:format_exception(v:exception)
-    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0
+    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
       return ''
     endif
     throw l:message
@@ -752,7 +762,7 @@ function! s:current_config_build_for_switch(start_directory) abort
     let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
   catch
     let l:message = s:format_exception(v:exception)
-    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0
+    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
       return ''
     endif
     throw l:message
@@ -912,7 +922,7 @@ function! s:run_switch_target() abort
   let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
   let l:config = s:read_json_object(l:config_path)
   let l:selection_prompt = 'Select CMake target'
-  let l:project_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+  let l:project_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   let l:current_target = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
@@ -1945,11 +1955,13 @@ function! s:run_build() abort
     let l:output_value = s:cmake_config_default_output
   endif
 
-  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
+  let l:build_target_directory = empty(l:preset_output_directory) ? l:build_directory : l:preset_output_directory
   let l:target_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
 
-  let l:argv = ['cmake', '--build', l:build_directory]
+  let l:argv = ['cmake', '--build', l:build_target_directory]
   if !empty(l:preset_value)
     call add(l:argv, '--preset')
     call add(l:argv, l:preset_value)
@@ -1968,7 +1980,37 @@ function! s:run_build() abort
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure'
         \ })
-  call s:write_info('Started build in ' . s:relative_path(l:build_directory, l:project_root))
+  call s:write_info('Started build in ' . s:relative_path(l:build_target_directory, l:project_root))
+endfunction
+
+function! s:run_test() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+
+  let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
+  if empty(trim(l:output_value))
+    let l:output_value = s:cmake_config_default_output
+  endif
+
+  let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
+  let l:test_directory = empty(l:preset_output_directory) ? l:build_directory : l:preset_output_directory
+  call mkdir(l:test_directory, 'p')
+
+  let l:argv = ['ctest']
+  let l:test_terminal_name = s:cmake_test_terminal_running_name(l:preset_value)
+  call s:run_build_command_in_vertical_terminal(l:argv, {
+        \ 'reuse_previous_build_window': 1,
+        \ 'split_orientation': 'horizontal',
+        \ 'terminal_name': l:test_terminal_name,
+        \ 'success_terminal_name': 'Success',
+        \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'working_directory': l:test_directory
+        \ })
+  call s:write_info('Started tests in ' . s:relative_path(l:test_directory, l:project_root))
 endfunction
 
 function! s:run_close() abort
@@ -2006,6 +2048,16 @@ function! s:cmake_build_terminal_running_name(preset_value, target_value) abort
     let l:target_value = 'all'
   endif
   call add(l:name_parts, '--target=' . l:target_value)
+
+  return join(l:name_parts, ' ')
+endfunction
+
+function! s:cmake_test_terminal_running_name(preset_value) abort
+  let l:name_parts = ['ctest']
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  if !empty(l:preset_value)
+    call add(l:name_parts, '--preset=' . l:preset_value)
+  endif
 
   return join(l:name_parts, ' ')
 endfunction
@@ -2060,7 +2112,7 @@ function! s:resolve_existing_local_config_path(start_directory) abort
     let l:current = l:parent
   endwhile
 
-  throw '.vim/.cmake/.config.json not found in current directory or any parent directory.'
+  throw s:cmake_missing_local_config_error
 endfunction
 
 function! s:resolve_or_create_local_config_for_generate(start_directory, project_root) abort
@@ -2068,7 +2120,7 @@ function! s:resolve_or_create_local_config_for_generate(start_directory, project
     return s:resolve_existing_local_config_path(a:start_directory)
   catch
     let l:message = s:format_exception(v:exception)
-    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') < 0
+    if stridx(l:message, s:cmake_missing_local_config_error) < 0
       throw l:message
     endif
   endtry
@@ -2091,7 +2143,7 @@ function! s:set_config_value(key, value, ...) abort
   let l:config_path = l:require_existing
         \ ? s:resolve_existing_local_config_path(l:working_directory)
         \ : s:cmake_config_path(l:working_directory)
-  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:config = filereadable(l:config_path)
         \ ? s:read_json_object(l:config_path)
         \ : s:default_cmake_config_payload()
@@ -2110,7 +2162,7 @@ function! s:remove_config_value(key, ...) abort
   let l:config_path = l:require_existing
         \ ? s:resolve_existing_local_config_path(l:working_directory)
         \ : s:cmake_config_path(l:working_directory)
-  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h:h:h'))
+  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:config = filereadable(l:config_path)
         \ ? s:read_json_object(l:config_path)
         \ : s:default_cmake_config_payload()
@@ -2142,7 +2194,7 @@ function! s:sync_environment_from_local_config(start_directory) abort
     let l:config_path = s:resolve_existing_local_config_path(l:start_directory)
   catch
     let l:message = s:format_exception(v:exception)
-    if stridx(l:message, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0
+    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
       return 0
     endif
     throw l:message
@@ -2310,6 +2362,13 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
+  let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
+  if !empty(l:working_directory)
+    let l:working_directory = s:normalize_full_path(l:working_directory)
+    if !isdirectory(l:working_directory)
+      throw 'Working directory not found: ' . l:working_directory
+    endif
+  endif
   let l:origin_window_id = win_getid()
   let l:main_window_height = winheight(0)
   let l:terminal_max_height = l:split_orientation ==# 'horizontal'
@@ -2320,6 +2379,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ 'success_terminal_name': l:success_terminal_name,
         \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix,
         \ 'on_success_callback': l:OnSuccessCallback,
+        \ 'working_directory': l:working_directory,
         \ 'max_height': l:terminal_max_height
         \ }
   let l:terminal = l:reuse_previous_build_window
@@ -2587,12 +2647,16 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
+  let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   let l:max_height = get(l:options, 'max_height', 0)
   if type(l:max_height) != v:t_number
     let l:max_height = str2nr(s:to_string_or_empty(l:max_height))
   endif
 
   let l:term_options = {'curwin': 1}
+  if !empty(l:working_directory)
+    let l:term_options.cwd = l:working_directory
+  endif
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
@@ -2871,7 +2935,7 @@ function! s:build_terminal_non_empty_lines(buffer_number) abort
 endfunction
 
 function! s:cmake_config_path(project_root) abort
-  return s:path_join(a:project_root, s:cmake_config_relative_path)
+  return s:path_join(a:project_root, s:cmake_config_filename)
 endfunction
 
 function! s:cmake_cache_path(config_path) abort

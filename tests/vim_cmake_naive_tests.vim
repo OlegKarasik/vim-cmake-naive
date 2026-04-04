@@ -84,6 +84,20 @@ function! s:create_fake_cmake_script(root, args_output_path, exit_code) abort
   return l:bin_dir
 endfunction
 
+function! s:create_fake_ctest_script(root, args_output_path, cwd_output_path, exit_code) abort
+  let l:bin_dir = s:path_join(a:root, 'fake-bin')
+  call mkdir(l:bin_dir, 'p')
+  let l:script_path = s:path_join(l:bin_dir, 'ctest')
+  call writefile([
+        \ '#!/bin/sh',
+        \ 'printf "%s\n" "$@" > ' . shellescape(a:args_output_path),
+        \ 'pwd > ' . shellescape(a:cwd_output_path),
+        \ 'exit ' . string(a:exit_code)
+        \ ], l:script_path, 'b')
+  call system('chmod +x ' . shellescape(l:script_path))
+  return l:bin_dir
+endfunction
+
 function! s:create_fake_cmake_generate_script_with_compile_commands(root, args_output_path, compile_commands, exit_code) abort
   let l:bin_dir = s:path_join(a:root, 'fake-bin')
   call mkdir(l:bin_dir, 'p')
@@ -497,8 +511,8 @@ function! s:test_cmake_config_creates_default_local_config() abort
     execute 'cd ' . fnameescape(l:fixture.root)
     execute 'silent CMakeConfig'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call assert_true(filereadable(l:config_path), 'Expected .vim/.cmake/.config.json to be created.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({}, s:read_json(l:config_path))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -511,7 +525,7 @@ function! s:test_cmake_config_preserves_existing_file() abort
   let l:initial_cwd = getcwd()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1, 'nested': {'enabled': 1}})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -555,10 +569,10 @@ function! s:test_cmake_set_config_preset_creates_config_with_preset() abort
   try
     execute 'cd ' . fnameescape(l:fixture.root)
     execute 'silent CMakeConfig'
-    execute 'silent CMakeConfigSetPreset debug'
+    call vim_cmake_naive#set_config_preset('debug')
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call assert_true(filereadable(l:config_path), 'Expected .vim/.cmake/.config.json to be created.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'preset': 'debug'}, s:read_json(l:config_path))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -571,7 +585,7 @@ function! s:test_cmake_set_config_preset_preserves_existing_keys() abort
   let l:initial_cwd = getcwd()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1, 'nested': {'enabled': 1}, 'preset': 'old'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -593,10 +607,10 @@ function! s:test_cmake_set_config_build_config_creates_config_with_value() abort
   try
     execute 'cd ' . fnameescape(l:fixture.root)
     execute 'silent CMakeConfig'
-    execute 'silent CMakeConfigSetBuild Debug'
+    call vim_cmake_naive#set_config_build_config('Debug')
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call assert_true(filereadable(l:config_path), 'Expected .vim/.cmake/.config.json to be created.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'build': 'Debug'}, s:read_json(l:config_path))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -609,7 +623,7 @@ function! s:test_cmake_set_config_build_config_preserves_other_keys() abort
   let l:initial_cwd = getcwd()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1, 'preset': 'debug', 'build': 'Release'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -633,8 +647,8 @@ function! s:test_cmake_set_config_output_creates_config_with_value() abort
     execute 'silent CMakeConfig'
     execute 'silent CMakeConfigSetOutput build'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call assert_true(filereadable(l:config_path), 'Expected .vim/.cmake/.config.json to be created.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'output': 'build'}, s:read_json(l:config_path))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -647,7 +661,7 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
   let l:initial_cwd = getcwd()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -668,7 +682,7 @@ function! s:test_cmake_set_commands_sync_environment_variables() abort
   let l:environment_snapshot = s:capture_naive_cmake_environment()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1})
     let $VIM_NAIVE_CMAKE_PRESET = 'stale-preset'
     let $VIM_NAIVE_CMAKE_BUILD = 'stale-build'
@@ -676,8 +690,8 @@ function! s:test_cmake_set_commands_sync_environment_variables() abort
     let $VIM_NAIVE_CMAKE_TARGET = 'stale-target'
 
     execute 'cd ' . fnameescape(l:fixture.root)
-    execute 'silent CMakeConfigSetPreset release'
-    execute 'silent CMakeConfigSetBuild RelWithDebInfo'
+    call vim_cmake_naive#set_config_preset('release')
+    call vim_cmake_naive#set_config_build_config('RelWithDebInfo')
     execute 'silent CMakeConfigSetOutput out/build'
 
     call assert_equal('release', s:env_value_or_empty('VIM_NAIVE_CMAKE_PRESET'))
@@ -704,12 +718,12 @@ function! s:test_cmake_set_commands_use_nearest_existing_local_config() abort
     call mkdir(l:deep_dir, 'p')
     execute 'cd ' . fnameescape(l:deep_dir)
 
-    execute 'silent CMakeConfigSetPreset release'
-    execute 'silent CMakeConfigSetBuild RelWithDebInfo'
+    call vim_cmake_naive#set_config_preset('release')
+    call vim_cmake_naive#set_config_build_config('RelWithDebInfo')
     execute 'silent CMakeConfigSetOutput out/build'
 
-    let l:root_config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    let l:deep_config_path = s:path_join(l:deep_dir, '.vim/.cmake/.config.json')
+    let l:root_config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:deep_config_path = s:path_join(l:deep_dir, '.vim-cmake-naive-config.json')
     let l:config = s:read_json(l:root_config_path)
 
     call assert_equal('release', get(l:config, 'preset', ''))
@@ -735,8 +749,8 @@ function! s:test_cmake_set_commands_error_when_no_local_config_found() abort
     call vim_cmake_naive#set_config_output('build')
 
     let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, '.vim/.cmake/.config.json not found in current directory or any parent directory.') >= 0)
-    call assert_false(filereadable(s:path_join(l:fixture.root, '.vim/.cmake/.config.json')))
+    call assert_true(stridx(l:messages, '.vim-cmake-naive-config.json not found in current directory or any parent directory.') >= 0)
+    call assert_false(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -759,6 +773,7 @@ function! s:test_cmake_commands_report_running_command_lock() abort
     call vim_cmake_naive#switch_target()
     call vim_cmake_naive#generate()
     call vim_cmake_naive#build()
+    call vim_cmake_naive#test()
     call vim_cmake_naive#set_config_preset('dev')
     call vim_cmake_naive#set_config_build_config('Debug')
     call vim_cmake_naive#set_config_output('build')
@@ -768,7 +783,7 @@ function! s:test_cmake_commands_report_running_command_lock() abort
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMake: another command CMakeBuild is already running') >= 0)
-    call assert_false(filereadable(s:path_join(l:fixture.root, '.vim/.cmake/.config.json')))
+    call assert_false(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_forced_running_command is v:null
       unlet! g:vim_cmake_naive_test_forced_running_cmake_command
@@ -794,7 +809,7 @@ function! s:test_cmake_command_lock_resets_after_command_failure() abort
           \ 'b')
     call vim_cmake_naive#cmake_config()
 
-    let l:config_path = s:path_join(l:root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:root, '.vim-cmake-naive-config.json')
     call assert_true(filereadable(l:config_path), 'Expected CMakeConfig to succeed after prior failure.')
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -810,8 +825,8 @@ function! s:test_cmake_config_default_creates_default_values() abort
     execute 'cd ' . fnameescape(l:fixture.root)
     execute 'silent CMakeConfigDefault'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call assert_true(filereadable(l:config_path), 'Expected .vim/.cmake/.config.json to be created.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -824,7 +839,7 @@ function! s:test_cmake_config_default_reapplies_defaults_and_preserves_other_key
   let l:initial_cwd = getcwd()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {'output': 'custom-out', 'preset': 'release', 'build': 'RelWithDebInfo', 'keep': 1})
@@ -847,7 +862,7 @@ function! s:test_cmake_config_default_syncs_environment_variables() abort
   let l:environment_snapshot = s:capture_naive_cmake_environment()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {'output': 'custom-out', 'preset': 'release', 'build': 'RelWithDebInfo', 'target': 'mylib', 'keep': 1})
@@ -883,8 +898,8 @@ function! s:test_cmake_config_uses_nearest_parent_cmakelists() abort
     execute 'cd ' . fnameescape(l:deep_dir)
     execute 'silent CMakeConfig'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    let l:wrong_path = s:path_join(l:deep_dir, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:wrong_path = s:path_join(l:deep_dir, '.vim-cmake-naive-config.json')
     call assert_true(filereadable(l:config_path), 'Expected config to be created at nearest CMakeLists project root.')
     call assert_false(filereadable(l:wrong_path), 'Config should not be created in nested working directory.')
   finally
@@ -904,7 +919,7 @@ function! s:test_cmake_config_errors_when_no_cmakelists_found() abort
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0)
-    call assert_false(filereadable(s:path_join(l:root, '.vim/.cmake/.config.json')))
+    call assert_false(filereadable(s:path_join(l:root, '.vim-cmake-naive-config.json')))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:root, 'rf')
@@ -922,7 +937,7 @@ function! s:test_cmake_config_default_uses_nearest_parent_cmakelists() abort
     execute 'cd ' . fnameescape(l:deep_dir)
     execute 'silent CMakeConfigDefault'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     let l:config = s:read_json(l:config_path)
     call assert_true(filereadable(l:config_path))
     call assert_equal('build', get(l:config, 'output', ''))
@@ -945,7 +960,7 @@ function! s:test_cmake_config_default_errors_when_no_cmakelists_found() abort
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0)
-    call assert_false(filereadable(s:path_join(l:root, '.vim/.cmake/.config.json')))
+    call assert_false(filereadable(s:path_join(l:root, '.vim-cmake-naive-config.json')))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:root, 'rf')
@@ -973,7 +988,7 @@ function! s:test_cmake_generate_creates_default_config_and_invokes_cmake() abort
     execute 'cd ' . fnameescape(l:deep_dir)
     execute 'silent CMakeGenerate'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'build')
     call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
@@ -1004,7 +1019,7 @@ function! s:test_cmake_generate_uses_existing_config_values() abort
   let l:initial_path = $PATH
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': 'dev', 'build': 'Release'})
 
     let l:args_path = s:path_join(l:fixture.root, 'cmake-args-existing.txt')
@@ -1052,7 +1067,7 @@ function! s:test_plugin_startup_exports_local_config_as_environment_variables() 
   let l:initial_list_env = exists('$VIM_NAIVE_CMAKE_LIST') ? $VIM_NAIVE_CMAKE_LIST : v:null
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {
@@ -1149,7 +1164,7 @@ function! s:test_cmake_generate_does_not_rely_on_startup_exported_environment_va
   let l:initial_output_env = exists('$VIM_NAIVE_CMAKE_OUTPUT') ? $VIM_NAIVE_CMAKE_OUTPUT : v:null
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {
@@ -1347,7 +1362,7 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
   let l:initial_path = $PATH
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {'output': 'build', 'preset': 'dev', 'build': 'Release'})
@@ -1546,7 +1561,7 @@ function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_command
     unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#generate()
 
-    let l:cache_path = s:path_join(l:fixture.root, '.vim/.cmake/cache.json')
+    let l:cache_path = s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json')
     let l:app_split_path = s:path_join(
           \ s:path_join(s:path_join(l:fixture.root, 'build/CMakeFiles'), 'app.dir'),
           \ 'compile_commands.json')
@@ -1586,7 +1601,7 @@ function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_command
   let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': 'dev', 'build': 'Release'})
 
     let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-cache-preset-args.txt')
@@ -1602,7 +1617,7 @@ function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_command
     unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#generate()
 
-    let l:cache_path = s:path_join(l:fixture.root, '.vim/.cmake/cache.json')
+    let l:cache_path = s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json')
     let l:preset_root = s:path_join(l:fixture.root, 'out/build-dir/dev')
     let l:app_split_path = s:path_join(
           \ s:path_join(s:path_join(l:preset_root, 'CMakeFiles'), 'app.dir'),
@@ -1664,7 +1679,7 @@ function! s:test_cmake_generate_ignores_targets_from_deps_directory() abort
     unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#generate()
 
-    let l:cache_path = s:path_join(l:fixture.root, '.vim/.cmake/cache.json')
+    let l:cache_path = s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json')
     let l:deps_split_path = s:path_join(
           \ s:path_join(s:path_join(l:fixture.root, 'build/_deps/zlib-build/CMakeFiles'), 'zlib.dir'),
           \ 'compile_commands.json')
@@ -1709,7 +1724,7 @@ function! s:test_cmake_build_creates_default_config_and_invokes_cmake_build() ab
     execute 'cd ' . fnameescape(l:deep_dir)
     execute 'silent CMakeBuild'
 
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'build')
     call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
@@ -1740,7 +1755,7 @@ function! s:test_cmake_build_does_not_rely_on_startup_exported_environment_varia
   let l:initial_output_env = exists('$VIM_NAIVE_CMAKE_OUTPUT') ? $VIM_NAIVE_CMAKE_OUTPUT : v:null
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {
@@ -1766,7 +1781,7 @@ function! s:test_cmake_build_does_not_rely_on_startup_exported_environment_varia
     call assert_equal(
           \ [
           \   '--build',
-          \   s:path_join(l:expected_root, 'out/build-dir'),
+          \   s:path_join(l:expected_root, 'out/build-dir/dev'),
           \   '--preset',
           \   'dev',
           \   '--target',
@@ -1795,7 +1810,7 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
   let l:initial_path = $PATH
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {'output': 'out/build-dir', 'preset': 'dev', 'target': 'mylib', 'build': 'Release'})
@@ -1814,7 +1829,7 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
     call assert_equal(
           \ [
           \   '--build',
-          \   s:path_join(l:expected_root, 'out/build-dir'),
+          \   s:path_join(l:expected_root, 'out/build-dir/dev'),
           \   '--preset',
           \   'dev',
           \   '--target',
@@ -1838,7 +1853,7 @@ function! s:test_cmake_build_sets_running_terminal_name_with_preset_and_target()
   let l:initial_path = $PATH
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'build': 'Release'})
@@ -1884,7 +1899,7 @@ function! s:test_cmake_build_sets_running_terminal_name_on_subsequent_invocation
   let l:initial_path = $PATH
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
           \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'build': 'Release'})
@@ -2362,6 +2377,245 @@ function! s:test_cmake_build_errors_when_no_cmakelists_found() abort
   endtry
 endfunction
 
+function! s:test_cmake_test_runs_ctest_in_output_directory_without_preset() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'ctest-args-no-preset.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-no-preset.txt')
+    let l:bin_dir = s:create_fake_ctest_script(l:fixture.root, l:args_path, l:cwd_path, 0)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    let l:deep_dir = s:path_join(l:fixture.root, 'src')
+    call mkdir(l:deep_dir, 'p')
+
+    execute 'cd ' . fnameescape(l:deep_dir)
+    execute 'silent CMakeTest'
+
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_test_dir = s:path_join(l:expected_root, 'build')
+    call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
+    call assert_equal([], s:read_non_empty_lines(l:args_path))
+    call assert_equal([l:expected_test_dir], s:read_non_empty_lines(l:cwd_path))
+  finally
+    let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_test_runs_ctest_in_output_preset_directory_with_preset() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': 'dev', 'build': 'Release'})
+
+    let l:args_path = s:path_join(l:fixture.root, 'ctest-args-with-preset.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-with-preset.txt')
+    let l:bin_dir = s:create_fake_ctest_script(l:fixture.root, l:args_path, l:cwd_path, 0)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#test()
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_test_dir = s:path_join(l:expected_root, 'out/build-dir/dev')
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
+    call assert_equal([], s:read_non_empty_lines(l:args_path))
+    call assert_equal([l:expected_test_dir], s:read_non_empty_lines(l:cwd_path))
+  finally
+    let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_test_sets_running_terminal_name_with_preset() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+
+    let l:args_path = s:path_join(l:fixture.root, 'ctest-args-running-name-with-preset.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-running-name-with-preset.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'ctest')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'pwd > ' . shellescape(l:cwd_path),
+          \ 'echo "running-name-test-start"',
+          \ 'sleep 2',
+          \ 'echo "running-name-test-end"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#test()
+
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    let l:running_window_id = s:wait_for_running_terminal_window(1000)
+    call assert_true(l:running_window_id > 0, 'Expected running test terminal window.')
+    let l:running_buffer_number = winbufnr(win_id2win(l:running_window_id))
+    call assert_equal('ctest --preset=dev', bufname(l:running_buffer_number))
+  finally
+    sleep 2200m
+    let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_test_sets_running_terminal_name_without_preset() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': ''})
+
+    let l:args_path = s:path_join(l:fixture.root, 'ctest-args-running-name-without-preset.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-running-name-without-preset.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'ctest')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'pwd > ' . shellescape(l:cwd_path),
+          \ 'echo "running-name-test-no-preset-start"',
+          \ 'sleep 2',
+          \ 'echo "running-name-test-no-preset-end"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#test()
+
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    let l:running_window_id = s:wait_for_running_terminal_window(1000)
+    call assert_true(l:running_window_id > 0, 'Expected running test terminal window.')
+    let l:running_buffer_number = winbufnr(win_id2win(l:running_window_id))
+    call assert_equal('ctest', bufname(l:running_buffer_number))
+  finally
+    sleep 2200m
+    let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_test_reuses_build_output_window_when_possible() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:build_args_path = s:path_join(l:fixture.root, 'cmake-build-args-cross-reuse-test.txt')
+    let l:test_args_path = s:path_join(l:fixture.root, 'ctest-args-cross-reuse-test.txt')
+    let l:test_cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-cross-reuse-test.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:cmake_script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:build_args_path),
+          \ 'echo "cross-reuse-build-before-test"',
+          \ 'exit 0'
+          \ ], l:cmake_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:cmake_script_path))
+    let l:ctest_script_path = s:path_join(l:bin_dir, 'ctest')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:test_args_path),
+          \ 'pwd > ' . shellescape(l:test_cwd_path),
+          \ 'echo "cross-reuse-test-after-build"',
+          \ 'exit 0'
+          \ ], l:ctest_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:ctest_script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:first_terminal = s:wait_for_captured_build_terminal_output('cross-reuse-build-before-test', 1000)
+    let l:first_window_id = get(l:first_terminal, 'winid', 0)
+    call assert_true(l:first_window_id > 0)
+
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#test()
+
+    let l:second_terminal = s:wait_for_captured_build_terminal_output('cross-reuse-test-after-build', 1000)
+    let l:second_window_id = get(l:second_terminal, 'winid', 0)
+    call assert_true(l:second_window_id > 0)
+    call assert_equal(l:first_window_id, l:second_window_id)
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected fake cmake build args file to be created.')
+    call assert_true(s:wait_for_file(l:test_args_path, 1000), 'Expected fake ctest args file to be created.')
+    call assert_true(s:wait_for_file(l:test_cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
+    call assert_equal(['--build', s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:build_args_path))
+    call assert_equal([], s:read_non_empty_lines(l:test_args_path))
+    call assert_equal([s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:test_cwd_path))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_close_closes_generate_terminal_window() abort
   if !has('unix')
     return
@@ -2487,7 +2741,7 @@ function! s:test_cmake_info_popup_shows_config_as_table() abort
   let l:initial_popup_options = get(g:, 'vim_cmake_naive_test_last_info_popup_options', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': 'dev', 'build': 'Release', 'target': 'mylib'})
     execute 'cd ' . fnameescape(l:fixture.root)
 
@@ -2504,7 +2758,7 @@ function! s:test_cmake_info_popup_shows_config_as_table() abort
     let l:popup_lines = get(g:, 'vim_cmake_naive_test_last_info_popup_items', [])
     let l:popup_line_width = empty(l:popup_lines) ? 0 : max(map(copy(l:popup_lines), 'strlen(v:val)'))
     let l:expected_popup_width = max([30, strlen(l:popup_title), l:popup_line_width])
-    call assert_true(stridx(l:popup_title, 'CMake info [.vim/.cmake/.config.json]') == 0)
+    call assert_true(stridx(l:popup_title, 'CMake info [.vim-cmake-naive-config.json]') == 0)
     call assert_equal(l:expected_popup_width, get(g:vim_cmake_naive_test_last_info_popup_options, 'minwidth', 0))
     call assert_equal(l:expected_popup_width, get(g:vim_cmake_naive_test_last_info_popup_options, 'maxwidth', 0))
     call assert_equal(4, get(g:vim_cmake_naive_test_last_info_popup_options, 'minheight', 0))
@@ -2617,7 +2871,7 @@ function! s:test_cmake_menu_popup_lists_commands_and_executes_selection() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(
-          \ [' 1.   CMakeConfig', ' 2.   CMakeConfigDefault', ' 3.   CMakeSwitchPreset', ' 4.   CMakeSwitchBuild', ' 5.   CMakeSwitchTarget', ' 6.   CMakeGenerate', ' 7.   CMakeBuild', ' 8.   CMakeClose', ' 9.   CMakeInfo', '10.   CMakeMenu', '11.   CMakeMenuFull', '12.   CMakeConfigSetPreset', '13.   CMakeConfigSetBuild', '14.   CMakeConfigSetOutput'],
+          \ [' 1.   CMakeConfig', ' 2.   CMakeConfigDefault', ' 3.   CMakeSwitchPreset', ' 4.   CMakeSwitchBuild', ' 5.   CMakeSwitchTarget', ' 6.   CMakeGenerate', ' 7.   CMakeBuild', ' 8.   CMakeTest', ' 9.   CMakeClose', '10.   CMakeInfo', '11.   CMakeMenu', '12.   CMakeMenuFull', '13.   CMakeConfigSetOutput'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select CMake command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
@@ -2629,7 +2883,7 @@ function! s:test_cmake_menu_popup_lists_commands_and_executes_selection() abort
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_menu_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderhighlight', []))
-    call assert_true(filereadable(s:path_join(l:fixture.root, '.vim/.cmake/.config.json')))
+    call assert_true(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_use_popup is v:null
       unlet! g:vim_cmake_naive_test_use_popup_menu
@@ -2712,13 +2966,13 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     execute 'silent CMakeMenu'
 
     call assert_equal(
-          \ ['1.   CMakeGenerate', '2.   CMakeBuild', '3.   CMakeClose', '4.   CMakeSwitchPreset', '5.   CMakeSwitchBuild', '6.   CMakeSwitchTarget'],
+          \ ['1.   CMakeGenerate', '2.   CMakeBuild', '3.   CMakeTest', '4.   CMakeClose', '5.   CMakeSwitchPreset', '6.   CMakeSwitchBuild', '7.   CMakeSwitchTarget'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select CMake command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxwidth', 0))
-    call assert_equal(6, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minheight', 0))
-    call assert_equal(6, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxheight', 0))
+    call assert_equal(7, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minheight', 0))
+    call assert_equal(7, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxheight', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_menu_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_menu_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
@@ -2798,17 +3052,17 @@ function! s:test_cmake_menu_executes_command_with_arguments() abort
   let l:initial_menu_command_args = get(g:, 'vim_cmake_naive_test_menu_command_args', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1})
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_use_popup_menu = 1
-    let g:vim_cmake_naive_test_popup_menu_response = 12
-    let g:vim_cmake_naive_test_menu_command_args = {'CMakeConfigSetPreset': 'dev-preset'}
+    let g:vim_cmake_naive_test_popup_menu_response = 13
+    let g:vim_cmake_naive_test_menu_command_args = {'CMakeConfigSetOutput': 'out/build'}
     unlet! g:vim_cmake_naive_test_menu_response
     unlet! g:vim_cmake_naive_test_inputlist_response
     call vim_cmake_naive#menu_full()
 
-    call assert_equal({'keep': 1, 'preset': 'dev-preset'}, s:read_json(l:config_path))
+    call assert_equal({'keep': 1, 'output': 'out/build'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
       unlet! g:vim_cmake_naive_test_use_popup_menu
@@ -2850,17 +3104,17 @@ function! s:test_cmake_menu_cancels_argument_command_when_args_empty() abort
   let l:initial_menu_command_args = get(g:, 'vim_cmake_naive_test_menu_command_args', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
-    call s:write_json(l:config_path, {'preset': 'old'})
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'old'})
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_use_popup_menu = 1
-    let g:vim_cmake_naive_test_popup_menu_response = 12
-    let g:vim_cmake_naive_test_menu_command_args = {'CMakeConfigSetPreset': ''}
+    let g:vim_cmake_naive_test_popup_menu_response = 13
+    let g:vim_cmake_naive_test_menu_command_args = {'CMakeConfigSetOutput': ''}
     unlet! g:vim_cmake_naive_test_menu_response
     unlet! g:vim_cmake_naive_test_inputlist_response
     call vim_cmake_naive#menu_full()
 
-    call assert_equal({'preset': 'old'}, s:read_json(l:config_path))
+    call assert_equal({'output': 'old'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
       unlet! g:vim_cmake_naive_test_use_popup_menu
@@ -2902,7 +3156,7 @@ function! s:test_cmake_menu_cancels_without_executing_when_popup_canceled() abor
   let l:initial_menu_command_args = get(g:, 'vim_cmake_naive_test_menu_command_args', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1})
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_use_popup_menu = 1
@@ -2951,7 +3205,7 @@ function! s:test_cmake_switch_preset_sets_selected_visible_preset() abort
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'old', 'build': 'RelWithDebInfo', 'keep': 1})
 
     call s:write_cmake_presets(
@@ -2995,7 +3249,7 @@ function! s:test_cmake_switch_preset_selects_none_and_removes_preset_key() abort
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'old', 'build': 'RelWithDebInfo', 'keep': 1})
 
     call s:write_cmake_presets(
@@ -3038,7 +3292,7 @@ function! s:test_cmake_switch_preset_syncs_environment_variables() abort
   let l:environment_snapshot = s:capture_naive_cmake_environment()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'old', 'build': 'RelWithDebInfo', 'keep': 1})
     call s:write_cmake_presets(
           \ s:path_join(l:fixture.root, 'CMakePresets.json'),
@@ -3106,7 +3360,7 @@ function! s:test_cmake_switch_preset_cancels_without_changing_config() abort
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'stay', 'build': 'Debug'})
     call s:write_cmake_presets(
           \ s:path_join(l:fixture.root, 'CMakePresets.json'),
@@ -3141,7 +3395,7 @@ function! s:test_cmake_switch_preset_only_none_is_selectable_when_no_visible_pre
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'old', 'build': 'RelWithDebInfo', 'keep': 1})
     call s:write_cmake_presets(
           \ s:path_join(l:fixture.root, 'CMakePresets.json'),
@@ -3183,7 +3437,7 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'dev'})
     call s:write_cmake_presets(
           \ s:path_join(l:fixture.root, 'CMakePresets.json'),
@@ -3258,7 +3512,7 @@ function! s:test_switch_preset_popup_display_items_marks_none_when_preset_missin
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'keep': 1})
     call s:write_cmake_presets(
           \ s:path_join(l:fixture.root, 'CMakePresets.json'),
@@ -3320,7 +3574,7 @@ function! s:test_cmake_switch_build_sets_selected_build_and_removes_preset() abo
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'build': 'Debug', 'preset': 'dev', 'keep': 1})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -3354,7 +3608,7 @@ function! s:test_cmake_switch_build_selects_none_and_removes_build() abort
   let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'build': 'RelWithDebInfo', 'preset': 'dev', 'keep': 1})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -3390,7 +3644,7 @@ function! s:test_cmake_switch_build_syncs_environment_variables() abort
   let l:environment_snapshot = s:capture_naive_cmake_environment()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'build': 'Debug', 'preset': 'dev', 'keep': 1})
     let $VIM_NAIVE_CMAKE_BUILD = 'stale-build'
     let $VIM_NAIVE_CMAKE_PRESET = 'stale-preset'
@@ -3443,7 +3697,7 @@ function! s:test_cmake_switch_build_popup_display_items_marks_current_selection(
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'build': 'RelWithDebInfo', 'preset': 'dev', 'keep': 1})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -3516,7 +3770,7 @@ function! s:test_cmake_switch_build_popup_display_items_marks_none_when_build_mi
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'preset': 'dev', 'keep': 1})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -3576,9 +3830,9 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
   let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -3630,9 +3884,9 @@ function! s:test_cmake_switch_target_selects_all_and_removes_target_key() abort
   let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
 
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
     call s:write_json(l:root_commands, s:fixture_entries())
@@ -3676,9 +3930,9 @@ function! s:test_cmake_switch_target_syncs_environment_variables() abort
   let l:environment_snapshot = s:capture_naive_cmake_environment()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
@@ -3732,9 +3986,9 @@ function! s:test_cmake_switch_target_popup_sets_selected_target() abort
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -3792,7 +4046,7 @@ function! s:test_cmake_switch_target_reports_missing_cache_file() abort
   let l:initial_errmsg = v:errmsg
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -3818,9 +4072,9 @@ function! s:test_cmake_switch_target_cancels_without_changing_config() abort
   let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'stay'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app']})
 
     let l:target_dir = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
@@ -3867,9 +4121,9 @@ function! s:test_cmake_switch_target_reports_missing_build_directory() abort
   let l:initial_cwd = getcwd()
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'missing-build', 'preset': 'dev'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app']})
 
     execute 'cd ' . fnameescape(l:fixture.root)
     call vim_cmake_naive#switch_target()
@@ -3891,9 +4145,9 @@ function! s:test_cmake_switch_target_selects_all_when_cache_targets_are_empty() 
   let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': []})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': []})
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
     call mkdir(s:path_join(l:fixture.root, 'build/dev'), 'p')
@@ -3936,9 +4190,9 @@ function! s:test_cmake_switch_target_reports_missing_target_compile_commands() a
   let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app']})
 
     let l:scan_root = s:path_join(l:fixture.root, 'build/dev')
     let l:target_dir = s:path_join(l:scan_root, 'CMakeFiles/app.dir')
@@ -3978,9 +4232,9 @@ function! s:test_cmake_switch_target_reports_missing_root_compile_commands_for_a
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app']})
 
     call mkdir(s:path_join(l:fixture.root, 'build/CMakeFiles/app.dir'), 'p')
 
@@ -4011,9 +4265,9 @@ function! s:test_cmake_switch_target_does_not_fallback_to_output_root_when_prese
   let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app']})
 
     let l:target_dir = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:output_root_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
@@ -4053,9 +4307,9 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 't11'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11']})
 
     let l:targets = ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11']
     let l:root_entries = []
@@ -4145,9 +4399,9 @@ function! s:test_switch_target_popup_filters_items_by_search_query() abort
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -4226,9 +4480,9 @@ function! s:test_switch_target_popup_display_items_marks_all_when_target_missing
   let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
 
   try
-    let l:config_path = s:path_join(l:fixture.root, '.vim/.cmake/.config.json')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
-    call s:write_json(s:path_join(l:fixture.root, '.vim/.cmake/cache.json'), {'targets': ['app']})
+    call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app']})
 
     let l:target_dir = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
@@ -4348,6 +4602,11 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_generate_reuses_build_output_window_when_possible()
   call s:test_cmake_build_recreates_visible_output_window_when_reuse_not_possible()
   call s:test_cmake_build_errors_when_no_cmakelists_found()
+  call s:test_cmake_test_runs_ctest_in_output_directory_without_preset()
+  call s:test_cmake_test_runs_ctest_in_output_preset_directory_with_preset()
+  call s:test_cmake_test_sets_running_terminal_name_with_preset()
+  call s:test_cmake_test_sets_running_terminal_name_without_preset()
+  call s:test_cmake_test_reuses_build_output_window_when_possible()
   call s:test_cmake_close_closes_generate_terminal_window()
   call s:test_cmake_close_closes_build_terminal_window()
   call s:test_cmake_info_popup_shows_config_as_table()

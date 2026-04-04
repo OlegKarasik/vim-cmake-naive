@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides fourteen commands:
+It provides thirteen commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -14,12 +14,11 @@ It provides fourteen commands:
 - `:CMakeSwitchTarget`
 - `:CMakeGenerate`
 - `:CMakeBuild`
+- `:CMakeTest`
 - `:CMakeClose`
 - `:CMakeInfo`
 - `:CMakeMenu`
 - `:CMakeMenuFull`
-- `:CMakeConfigSetPreset <preset>`
-- `:CMakeConfigSetBuild <value>`
 - `:CMakeConfigSetOutput <value>`
 
 ## Install (vim-plug)
@@ -42,7 +41,7 @@ Create local CMake config file for this project:
 :CMakeConfig
 ```
 
-This creates `.vim/.cmake/.config.json` in the nearest ancestor directory that
+This creates `.vim-cmake-naive-config.json` in the nearest ancestor directory that
 contains `CMakeLists.txt` (searching from current directory upward). If no
 `CMakeLists.txt` is found, the command reports an error.
 
@@ -52,7 +51,7 @@ Apply default local CMake configuration:
 :CMakeConfigDefault
 ```
 
-This creates/updates `.vim/.cmake/.config.json` in the nearest ancestor
+This creates/updates `.vim-cmake-naive-config.json` in the nearest ancestor
 directory that contains `CMakeLists.txt` (searching upward from current
 directory), with:
 - `output`: `"build"`
@@ -61,14 +60,14 @@ directory), with:
 
 If no `CMakeLists.txt` is found, the command reports an error.
 
-On plugin startup, if local config `.vim/.cmake/.config.json` exists in current
+On plugin startup, if local config `.vim-cmake-naive-config.json` exists in current
 directory or parent directories, all config keys are exported to Vim process
 environment variables with `VIM_NAIVE_CMAKE_` prefix (uppercase key names;
 non-alphanumeric characters converted to `_`).
 
 Whenever plugin commands update local config (`:CMakeConfig`,
 `:CMakeConfigDefault`, `:CMakeConfigSet*`, `:CMakeSwitch*`, and default config
-creation inside `:CMakeGenerate`/`:CMakeBuild`), these environment variables are
+creation inside `:CMakeGenerate`/`:CMakeBuild`/`:CMakeTest`), these environment variables are
 resynced immediately in Vim process. Removed config keys are removed from
 `VIM_NAIVE_CMAKE_*` environment as well.
 
@@ -80,7 +79,7 @@ Generate CMake build system from local config:
 
 This command:
 - finds nearest `CMakeLists.txt` from current directory upward
-- finds nearest existing `.vim/.cmake/.config.json`, or creates default config
+- finds nearest existing `.vim-cmake-naive-config.json`, or creates default config
   at the discovered CMake project root when none exists
 - creates `<output>` directory when missing
 - when `preset` is non-empty, also creates `<output>/<preset>` when missing
@@ -97,7 +96,7 @@ This command:
   - `cmake generate` when preset is empty
 - renames terminal status name on completion to `Success` or `Failure (<code>)`
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
-- extracts discovered targets and stores them to `.vim/.cmake/cache.json` field `targets`
+- extracts discovered targets and stores them to `.vim-cmake-naive-cache.json` field `targets`
 - splits root `compile_commands.json` into target-local `compile_commands.json` files under corresponding target directories
 - reuses previously opened visible build/generate output window when possible; otherwise recreates it
 - returns immediately; completion/failures are reported in that terminal/messages
@@ -110,9 +109,10 @@ Build project with CMake from local config:
 
 This command:
 - finds nearest `CMakeLists.txt` from current directory upward
-- finds nearest existing `.vim/.cmake/.config.json`, or creates default config
+- finds nearest existing `.vim-cmake-naive-config.json`, or creates default config
   at the discovered CMake project root when none exists
-- runs `cmake --build <output>`
+- runs `cmake --build <output>` when `preset` is empty
+- runs `cmake --build <output>/<preset>` when `preset` is non-empty
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
 - opens a horizontal split terminal and starts the build there asynchronously
@@ -125,6 +125,29 @@ This command:
 - reuses previously opened visible build output window when possible; otherwise recreates it
 - returns immediately; build completion and failures are reported in that terminal/messages
 
+Run tests with CTest from local config:
+
+```vim
+:CMakeTest
+```
+
+This command:
+- finds nearest `CMakeLists.txt` from current directory upward
+- finds nearest existing `.vim-cmake-naive-config.json`, or creates default config
+  at the discovered CMake project root when none exists
+- resolves test working directory from config:
+  - `<output>` when preset is empty
+  - `<output>/<preset>` when preset is non-empty
+- runs `ctest` without parameters in that working directory
+- opens a horizontal split terminal and starts tests there asynchronously
+- limits test terminal height to at most 10 lines and never more than half of the main window height
+- sets terminal status name while running to:
+  - `ctest --preset=<preset>` when preset is set
+  - `ctest` when preset is empty
+- renames terminal status name on completion to `Success` or `Failure (<code>)`
+- reuses previously opened visible build/generate/test output window when possible; otherwise recreates it
+- returns immediately; test completion and failures are reported in that terminal/messages
+
 Close CMake terminal windows spawned by generate/build:
 
 ```vim
@@ -132,9 +155,9 @@ Close CMake terminal windows spawned by generate/build:
 ```
 
 This command:
-- closes visible terminal windows created by `:CMakeGenerate` or `:CMakeBuild`
+- closes visible terminal windows created by `:CMakeGenerate`, `:CMakeBuild`, or `:CMakeTest`
 - closes hidden terminal buffers created by this plugin
-- resets internal terminal reuse state for subsequent build/generate commands
+- resets internal terminal reuse state for subsequent build/generate/test commands
 
 Show local CMake configuration in popup table:
 
@@ -143,7 +166,7 @@ Show local CMake configuration in popup table:
 ```
 
 This command:
-- reads nearest existing `.vim/.cmake/.config.json`
+- reads nearest existing `.vim-cmake-naive-config.json`
 - shows popup with key/value table (`key | value`)
 - uses standard popup style (smooth single-line border, `Pmenu` colors)
 - if config is missing, shows:
@@ -156,7 +179,7 @@ Open a compact popup command menu for common CMake commands:
 ```
 
 This command:
-- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeClose`, `CMakeSwitchPreset`, `CMakeSwitchBuild`, `CMakeSwitchTarget`
+- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeTest`, `CMakeClose`, `CMakeSwitchPreset`, `CMakeSwitchBuild`, `CMakeSwitchTarget`
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - executes the selected command
 
@@ -170,7 +193,7 @@ This command:
 - shows a popup with all available `CMake*` Ex commands from this plugin
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - executes the selected command
-- asks for arguments when a selected command requires them (for example `CMakeConfigSetPreset`)
+- asks for arguments when a selected command requires them (for example `CMakeConfigSetOutput`)
 
 Switch local CMake preset from `CMakePresets.json`:
 
@@ -183,7 +206,7 @@ This command:
 - reads `CMakePresets.json` at that project root
 - always includes predefined preset `(none)`
 - lists selectable configure presets (non-hidden, condition evaluates to true) in sorted order
-- prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetPreset`
+- prompts through a popup menu for selection (fallback to menu/inputlist) and applies the selected preset directly
 - when a preset other than `none` is selected, removes `build` key from local config
 - when `none` is selected, removes `preset` key from local config
 - popup entries are ordered and prefixed with a number
@@ -201,10 +224,10 @@ Switch local CMake build type:
 ```
 
 This command:
-- reads nearest existing `.vim/.cmake/.config.json`
+- reads nearest existing `.vim-cmake-naive-config.json`
 - always includes predefined build option `(none)`
 - always lists default build types: `Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`
-- prompts through a popup menu for selection (fallback to menu/inputlist) and applies it via `:CMakeConfigSetBuild`
+- prompts through a popup menu for selection (fallback to menu/inputlist) and applies the selected build type directly
 - removes `preset` key from local config after applying selected build type
 - when `none` is selected, removes `build` key from local config
 - popup entries are ordered and prefixed with a number
@@ -220,9 +243,9 @@ Switch local CMake target from cached targets:
 ```
 
 This command:
-- reads nearest existing `.vim/.cmake/.config.json`
-- reads nearest existing `.vim/.cmake/cache.json`
-- requires `cache.json` to contain key `targets` generated by `:CMakeGenerate`
+- reads nearest existing `.vim-cmake-naive-config.json`
+- reads nearest existing `.vim-cmake-naive-cache.json`
+- requires `.vim-cmake-naive-cache.json` to contain key `targets` generated by `:CMakeGenerate`
 - resolves build directory from config `output` (relative to config root)
 - always includes predefined target `(all)`
 - discovers selectable targets from cache key `targets`
@@ -239,38 +262,14 @@ This command:
 - if cache file is missing, command reports:
   `No cache found. Please run CMakeGenerate command first.`
 
-Set the local CMake preset in `.vim/.cmake/.config.json`:
-
-```vim
-:CMakeConfigSetPreset debug
-:CMakeConfigSetPreset Release With DebInfo
-```
-
-This updates the nearest existing `.vim/.cmake/.config.json` in current
-directory or parent directories. If no local config exists, the command reports
-an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
-It also updates `VIM_NAIVE_CMAKE_PRESET` in Vim process environment.
-
-Set local CMake build config in `.vim/.cmake/.config.json`:
-
-```vim
-:CMakeConfigSetBuild Debug
-:CMakeConfigSetBuild RelWithDebInfo
-```
-
-This updates the nearest existing `.vim/.cmake/.config.json` in current
-directory or parent directories. If no local config exists, the command reports
-an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
-It also updates `VIM_NAIVE_CMAKE_BUILD` in Vim process environment.
-
-Set local CMake output in `.vim/.cmake/.config.json`:
+Set local CMake output in `.vim-cmake-naive-config.json`:
 
 ```vim
 :CMakeConfigSetOutput build
 :CMakeConfigSetOutput out/build
 ```
 
-This updates the nearest existing `.vim/.cmake/.config.json` in current
+This updates the nearest existing `.vim-cmake-naive-config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
 It also updates `VIM_NAIVE_CMAKE_OUTPUT` in Vim process environment.

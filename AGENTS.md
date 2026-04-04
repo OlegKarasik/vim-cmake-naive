@@ -32,3 +32,16 @@
 1. All long running operations (invocation of external tools) must be
    asynchronous.
 2. All asynchronous operations use vim terminal feature.
+
+# Concepts
+
+1. "Root Directory" - a directory where `CMakeLists.txt` file is located. "Root
+   Directory" is detected at runtime by searching for `CMakeLists.txt` upward
+   starting from the current directory.
+2. "Local Configuration" - a configuration file (`.vim-cmake-naive-config.json`)
+   located in the root directory.
+2. "Local Cache" - a cache file (`.vim-cmake-naive-cache.json`) located in the
+   root directory. 
+3. "Build Directory" - an directory path which is composed from root directory
+   path + `<output>/<preset>` values from local configuration if there is a
+   `<preset>` value set. Otherwise, it is set to root directory path + `<output>`.
