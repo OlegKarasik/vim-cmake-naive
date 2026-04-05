@@ -14,6 +14,7 @@ let s:cmake_switch_preset_none_name = 'none'
 let s:cmake_switch_build_none_name = 'none'
 let s:cmake_switch_target_all_name = 'all'
 let s:cmake_switch_target_missing_cache_error = 'No cache found. Please run CMakeGenerate command first.'
+let s:cmake_run_missing_target_error = 'No target selected. Please use CMakeSwitchTarget command first.'
 let s:cmake_switch_build_default_types = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel']
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
@@ -25,6 +26,7 @@ let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:last_cmake_build_window_id = -1
 let s:last_cmake_build_buffer_number = -1
 let s:last_cmake_build_split_orientation = 'vertical'
+let s:build_terminal_success_callbacks = {}
 let s:running_cmake_command_name = ''
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
@@ -38,6 +40,7 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
       \ {'name': 'CMakeTest', 'needs_args': 0},
+      \ {'name': 'CMakeRun', 'needs_args': 0},
       \ {'name': 'CMakeClose', 'needs_args': 0},
       \ {'name': 'CMakeInfo', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
@@ -45,12 +48,9 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfigSetOutput', 'needs_args': 1}
       \ ]
 let s:cmake_menu_compact_command_specs = [
-      \ {'name': 'CMakeGenerate', 'needs_args': 0},
       \ {'name': 'CMakeBuild', 'needs_args': 0},
+      \ {'name': 'CMakeRun', 'needs_args': 0},
       \ {'name': 'CMakeTest', 'needs_args': 0},
-      \ {'name': 'CMakeClose', 'needs_args': 0},
-      \ {'name': 'CMakeSwitchPreset', 'needs_args': 0},
-      \ {'name': 'CMakeSwitchBuild', 'needs_args': 0},
       \ {'name': 'CMakeSwitchTarget', 'needs_args': 0}
       \ ]
 
@@ -182,6 +182,14 @@ endfunction
 function! vim_cmake_naive#test() abort
   try
     call s:run_cmake_command('CMakeTest', function('s:run_test'), [])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#run() abort
+  try
+    call s:run_cmake_command('CMakeRun', function('s:run_run'), [])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -2013,10 +2021,180 @@ function! s:run_test() abort
   call s:write_info('Started tests in ' . s:relative_path(l:test_directory, l:project_root))
 endfunction
 
+function! s:run_run() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+
+  let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
+  if empty(trim(l:output_value))
+    let l:output_value = s:cmake_config_default_output
+  endif
+
+  let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  let l:build_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_build_config_key, '')))
+  let l:target_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
+  if empty(l:target_value)
+    throw s:cmake_run_missing_target_error
+  endif
+
+  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
+  let l:run_directory = empty(l:preset_output_directory) ? l:build_directory : l:preset_output_directory
+  if !isdirectory(l:run_directory)
+    throw 'Build directory not found: ' . l:run_directory
+  endif
+
+  let l:target_executable = s:resolve_target_executable_path(l:target_value, l:run_directory, l:build_value)
+  let l:argv = [l:target_executable]
+  let l:run_terminal_name = s:cmake_run_terminal_running_name(l:preset_value, l:target_value)
+  call s:run_build_command_in_vertical_terminal(l:argv, {
+        \ 'reuse_previous_build_window': 1,
+        \ 'split_orientation': 'horizontal',
+        \ 'terminal_name': l:run_terminal_name,
+        \ 'success_terminal_name': 'Success',
+        \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'working_directory': l:run_directory
+        \ })
+  call s:write_info('Started run in ' . s:relative_path(l:run_directory, l:project_root))
+endfunction
+
+function! s:run_target_executable_candidate_names(target_name) abort
+  let l:target_name = trim(s:to_string_or_empty(a:target_name))
+  if empty(l:target_name)
+    throw 'Missing required argument: <target>.'
+  endif
+  if l:target_name =~# '[/\\]'
+    throw 'The target parameter must be a target name (for example: my_app), not a path.'
+  endif
+
+  let l:names = [l:target_name]
+  if s:is_windows
+    call add(l:names, l:target_name . '.exe')
+    call add(l:names, l:target_name . '.bat')
+    call add(l:names, l:target_name . '.cmd')
+  endif
+
+  let l:result = []
+  let l:seen = {}
+  for l:name in l:names
+    if has_key(l:seen, l:name)
+      continue
+    endif
+
+    let l:seen[l:name] = 1
+    call add(l:result, l:name)
+  endfor
+
+  return l:result
+endfunction
+
+function! s:run_target_executable_candidate_paths(candidate_names, run_directory, build_value) abort
+  if empty(trim(a:run_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+
+  let l:build_value = trim(s:to_string_or_empty(a:build_value))
+  let l:candidate_paths = []
+  for l:candidate_name in a:candidate_names
+    call add(l:candidate_paths, s:path_join(a:run_directory, l:candidate_name))
+    if !empty(l:build_value)
+      call add(
+            \ l:candidate_paths,
+            \ s:path_join(s:path_join(a:run_directory, l:build_value), l:candidate_name))
+    endif
+  endfor
+
+  return l:candidate_paths
+endfunction
+
+function! s:is_run_target_executable_path_candidate(path, run_directory) abort
+  if !filereadable(a:path) || !s:is_sub_path_of(a:path, a:run_directory)
+    return 0
+  endif
+
+  let l:relative_path = substitute(s:relative_path(a:path, a:run_directory), '\\', '/', 'g')
+  if l:relative_path =~# '\v(^|/)CMakeFiles(/|$)'
+    return 0
+  endif
+
+  return 1
+endfunction
+
+function! s:resolve_target_executable_path(target_name, run_directory, build_value) abort
+  if empty(trim(a:run_directory))
+    throw 'Build directory cannot be empty.'
+  endif
+  let l:run_directory = s:normalize_full_path(a:run_directory)
+  let l:candidate_names = s:run_target_executable_candidate_names(a:target_name)
+  let l:candidate_paths = s:run_target_executable_candidate_paths(l:candidate_names, l:run_directory, a:build_value)
+  let l:matches = []
+  let l:non_executable_matches = []
+  let l:seen = {}
+
+  for l:candidate_path in l:candidate_paths
+    let l:normalized_candidate_path = s:normalize_full_path(l:candidate_path)
+    if has_key(l:seen, l:normalized_candidate_path)
+          \ || !s:is_run_target_executable_path_candidate(l:normalized_candidate_path, l:run_directory)
+      continue
+    endif
+
+    let l:seen[l:normalized_candidate_path] = 1
+    if s:is_windows || executable(l:normalized_candidate_path)
+      call add(l:matches, l:normalized_candidate_path)
+    else
+      call add(l:non_executable_matches, l:normalized_candidate_path)
+    endif
+  endfor
+
+  if empty(l:matches)
+    for l:candidate_name in l:candidate_names
+      let l:glob_pattern = s:path_join(s:path_join(l:run_directory, '**'), l:candidate_name)
+      for l:glob_match in glob(l:glob_pattern, 0, 1)
+        let l:normalized_glob_match = s:normalize_full_path(l:glob_match)
+        if has_key(l:seen, l:normalized_glob_match)
+              \ || !s:is_run_target_executable_path_candidate(l:normalized_glob_match, l:run_directory)
+          continue
+        endif
+
+        let l:seen[l:normalized_glob_match] = 1
+        if s:is_windows || executable(l:normalized_glob_match)
+          call add(l:matches, l:normalized_glob_match)
+        else
+          call add(l:non_executable_matches, l:normalized_glob_match)
+        endif
+      endfor
+    endfor
+  endif
+
+  if len(l:matches) > 1
+    let l:relative_matches = []
+    for l:match in l:matches
+      call add(l:relative_matches, s:relative_path(l:match, l:run_directory))
+    endfor
+    call sort(l:relative_matches)
+    throw 'Multiple executable files found for target ''' . a:target_name . ''' under '
+          \ . l:run_directory . ': ' . join(l:relative_matches, ', ')
+  endif
+
+  if len(l:matches) == 1
+    return l:matches[0]
+  endif
+
+  if !empty(l:non_executable_matches)
+    call sort(l:non_executable_matches)
+    throw 'Target file is not executable: ' . l:non_executable_matches[0]
+  endif
+
+  throw 'Executable file not found for target ''' . a:target_name . ''' under ' . l:run_directory
+endfunction
+
 function! s:run_close() abort
   let l:closed_window_count = s:close_build_terminal_windows()
   let l:closed_buffer_count = s:close_build_terminal_hidden_buffers()
   call s:reset_previous_build_terminal_window()
+  let s:build_terminal_success_callbacks = {}
   call s:write_info(
         \ 'Closed build terminals: '
         \ . l:closed_window_count
@@ -2057,6 +2235,20 @@ function! s:cmake_test_terminal_running_name(preset_value) abort
   let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
   if !empty(l:preset_value)
     call add(l:name_parts, '--preset=' . l:preset_value)
+  endif
+
+  return join(l:name_parts, ' ')
+endfunction
+
+function! s:cmake_run_terminal_running_name(preset_value, target_value) abort
+  let l:name_parts = ['cmake', 'run']
+  let l:preset_value = trim(s:to_string_or_empty(a:preset_value))
+  let l:target_value = trim(s:to_string_or_empty(a:target_value))
+  if !empty(l:preset_value)
+    call add(l:name_parts, '--preset=' . l:preset_value)
+  endif
+  if !empty(l:target_value)
+    call add(l:name_parts, '--target=' . l:target_value)
   endif
 
   return join(l:name_parts, ' ')
@@ -2451,6 +2643,7 @@ function! s:open_new_build_terminal_window(split_orientation, max_height) abort
   else
     execute 'silent keepalt vertical botright new'
   endif
+  call s:disable_swapfile_for_current_buffer()
   execute 'silent file ' . fnameescape(s:build_terminal_buffer_name)
   let b:vim_cmake_naive_build_terminal = 1
   return {
@@ -2637,6 +2830,12 @@ function! s:is_terminal_build_supported() abort
         \ && exists('*job_info')
 endfunction
 
+function! s:disable_swapfile_for_current_buffer() abort
+  if &l:swapfile
+    setlocal noswapfile
+  endif
+endfunction
+
 function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:options = get(a:000, 0, {})
   if type(l:options) != v:t_dict
@@ -2654,13 +2853,15 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 
   let l:term_options = {'curwin': 1}
+  call s:disable_swapfile_for_current_buffer()
+  call s:set_build_terminal_success_callback(a:window_id, l:OnSuccessCallback)
   if !empty(l:working_directory)
     let l:term_options.cwd = l:working_directory
   endif
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:OnSuccessCallback])
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix])
   endif
 
   let l:term_start_options = copy(l:term_options)
@@ -2669,19 +2870,26 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 
   try
-    let l:job = term_start(copy(a:argv), l:term_start_options)
-  catch /^Vim\%((\a\+)\)\=:E475:/
-    if !has_key(l:term_start_options, 'term_name')
-      throw v:exception
-    endif
+    try
+      let l:job = term_start(copy(a:argv), l:term_start_options)
+    catch /^Vim\%((\a\+)\)\=:E475:/
+      if !has_key(l:term_start_options, 'term_name')
+        throw v:exception
+      endif
 
-    call remove(l:term_start_options, 'term_name')
-    let l:job = term_start(copy(a:argv), l:term_start_options)
+      call remove(l:term_start_options, 'term_name')
+      let l:job = term_start(copy(a:argv), l:term_start_options)
+    endtry
+  catch
+    call s:take_build_terminal_success_callback(a:window_id)
+    throw v:exception
   endtry
   if type(l:job) != v:t_number || l:job <= 0
+    call s:take_build_terminal_success_callback(a:window_id)
     throw 'Failed to start build command in terminal window.'
   endif
 
+  call s:disable_swapfile_for_current_buffer()
   let l:terminal_buffer_number = bufnr('%')
   let b:vim_cmake_naive_build_terminal = 1
   if l:max_height > 0
@@ -2703,6 +2911,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
     endif
+    let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
     if l:exit_code == 0
       call s:invoke_terminal_success_callback(l:OnSuccessCallback)
     else
@@ -2728,7 +2937,7 @@ function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) a
   call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, OnSuccessCallback, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, job, status) abort
   let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
   call s:set_terminal_name_for_window(
         \ a:window_id,
@@ -2742,11 +2951,42 @@ function! s:on_build_terminal_command_exit(window_id, success_terminal_name, fai
     call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   endif
 
+  let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
   if l:exit_code == 0
-    call s:invoke_terminal_success_callback(a:OnSuccessCallback)
+    call s:invoke_terminal_success_callback(l:OnSuccessCallback)
   else
     call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
   endif
+endfunction
+
+function! s:set_build_terminal_success_callback(window_id, Callback) abort
+  if type(a:window_id) != v:t_number || a:window_id <= 0
+    return
+  endif
+
+  let l:key = string(a:window_id)
+  if type(a:Callback) == v:t_func
+    let s:build_terminal_success_callbacks[l:key] = a:Callback
+    return
+  endif
+
+  if has_key(s:build_terminal_success_callbacks, l:key)
+    call remove(s:build_terminal_success_callbacks, l:key)
+  endif
+endfunction
+
+function! s:take_build_terminal_success_callback(window_id) abort
+  if type(a:window_id) != v:t_number || a:window_id <= 0
+    return v:null
+  endif
+
+  let l:key = string(a:window_id)
+  let l:Callback = get(s:build_terminal_success_callbacks, l:key, v:null)
+  if has_key(s:build_terminal_success_callbacks, l:key)
+    call remove(s:build_terminal_success_callbacks, l:key)
+  endif
+
+  return l:Callback
 endfunction
 
 function! s:invoke_terminal_success_callback(Callback) abort
@@ -2822,6 +3062,7 @@ function! s:set_terminal_name_for_window(window_id, terminal_name) abort
       execute 'silent! bwipeout! ' . l:conflicting_buffer_number
     endfor
 
+    call s:disable_swapfile_for_current_buffer()
     execute 'silent file ' . fnameescape(l:terminal_name)
     let b:vim_cmake_naive_build_terminal = 1
   finally
@@ -2886,6 +3127,7 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
   let l:max_height = l:is_valid_buffer
         \ ? getbufvar(a:buffer_number, 'vim_cmake_naive_build_terminal_max_height', 0)
         \ : 0
+  let l:swapfile_enabled = l:is_valid_buffer ? getbufvar(a:buffer_number, '&swapfile', 0) : 0
   let g:vim_cmake_naive_test_last_build_terminal = {
         \ 'winid': a:window_id,
         \ 'width': l:window_width,
@@ -2895,6 +3137,7 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
         \ 'is_vertical_split': l:is_vertical_split,
         \ 'is_horizontal_split': l:is_horizontal_split,
         \ 'is_terminal': l:is_terminal,
+        \ 'swapfile_enabled': l:swapfile_enabled,
         \ 'buffer_name': l:buffer_name,
         \ 'lines': s:build_terminal_non_empty_lines(a:buffer_number)
         \ }

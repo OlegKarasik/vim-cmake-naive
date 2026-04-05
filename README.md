@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides thirteen commands:
+It provides fourteen commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -15,6 +15,7 @@ It provides thirteen commands:
 - `:CMakeGenerate`
 - `:CMakeBuild`
 - `:CMakeTest`
+- `:CMakeRun`
 - `:CMakeClose`
 - `:CMakeInfo`
 - `:CMakeMenu`
@@ -67,7 +68,7 @@ non-alphanumeric characters converted to `_`).
 
 Whenever plugin commands update local config (`:CMakeConfig`,
 `:CMakeConfigDefault`, `:CMakeConfigSet*`, `:CMakeSwitch*`, and default config
-creation inside `:CMakeGenerate`/`:CMakeBuild`/`:CMakeTest`), these environment variables are
+creation inside `:CMakeGenerate`/`:CMakeBuild`/`:CMakeTest`/`:CMakeRun`), these environment variables are
 resynced immediately in Vim process. Removed config keys are removed from
 `VIM_NAIVE_CMAKE_*` environment as well.
 
@@ -148,16 +149,41 @@ This command:
 - reuses previously opened visible build/generate/test output window when possible; otherwise recreates it
 - returns immediately; test completion and failures are reported in that terminal/messages
 
-Close CMake terminal windows spawned by generate/build:
+Run current target from local config:
+
+```vim
+:CMakeRun
+```
+
+This command:
+- finds nearest `CMakeLists.txt` from current directory upward
+- finds nearest existing `.vim-cmake-naive-config.json`, or creates default config
+  at the discovered CMake project root when none exists
+- requires config key `target` to be set (use `:CMakeSwitchTarget` first)
+- resolves run directory from config:
+  - `<output>` when preset is empty
+  - `<output>/<preset>` when preset is non-empty
+- searches for an executable file matching the selected target under that run directory
+- runs the discovered executable in that run directory
+- opens a horizontal split terminal and starts execution there asynchronously
+- limits run terminal height to at most 10 lines and never more than half of the main window height
+- sets terminal status name while running to:
+  - `cmake run --preset=<preset> --target=<target>` when preset is set
+  - `cmake run --target=<target>` when preset is empty
+- renames terminal status name on completion to `Success` or `Failure (<code>)`
+- reuses previously opened visible build/generate/test/run output window when possible; otherwise recreates it
+- returns immediately; completion/failures are reported in that terminal/messages
+
+Close CMake terminal windows spawned by generate/build/test/run:
 
 ```vim
 :CMakeClose
 ```
 
 This command:
-- closes visible terminal windows created by `:CMakeGenerate`, `:CMakeBuild`, or `:CMakeTest`
+- closes visible terminal windows created by `:CMakeGenerate`, `:CMakeBuild`, `:CMakeTest`, or `:CMakeRun`
 - closes hidden terminal buffers created by this plugin
-- resets internal terminal reuse state for subsequent build/generate/test commands
+- resets internal terminal reuse state for subsequent build/generate/test/run commands
 
 Show local CMake configuration in popup table:
 
@@ -179,7 +205,7 @@ Open a compact popup command menu for common CMake commands:
 ```
 
 This command:
-- shows a popup with only these commands: `CMakeGenerate`, `CMakeBuild`, `CMakeTest`, `CMakeClose`, `CMakeSwitchPreset`, `CMakeSwitchBuild`, `CMakeSwitchTarget`
+- shows a popup with only these commands: `CMakeBuild`, `CMakeRun`, `CMakeTest`, `CMakeSwitchTarget`
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - executes the selected command
 

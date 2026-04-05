@@ -774,6 +774,7 @@ function! s:test_cmake_commands_report_running_command_lock() abort
     call vim_cmake_naive#generate()
     call vim_cmake_naive#build()
     call vim_cmake_naive#test()
+    call vim_cmake_naive#run()
     call vim_cmake_naive#set_config_preset('dev')
     call vim_cmake_naive#set_config_build_config('Debug')
     call vim_cmake_naive#set_config_output('build')
@@ -1248,6 +1249,7 @@ function! s:test_cmake_generate_opens_horizontal_terminal_with_command_output() 
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
+    call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
     call assert_equal(l:expected_max_height, get(l:terminal, 'max_height', 0))
     call assert_true(get(l:terminal, 'height', 0) <= get(l:terminal, 'max_height', 0))
@@ -1431,6 +1433,19 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
     call assert_true(l:running_window_id > 0, 'Expected running generate terminal window on second invocation.')
     let l:running_buffer_number = winbufnr(win_id2win(l:running_window_id))
     call assert_equal('cmake generate --preset=dev', bufname(l:running_buffer_number))
+    let l:origin_window_id = win_getid()
+    if win_gotoid(l:running_window_id)
+      let l:current_window_number = winnr()
+      let l:is_vertical_split = winnr('h') != l:current_window_number
+            \ || winnr('l') != l:current_window_number
+      let l:is_horizontal_split = winnr('k') != l:current_window_number
+            \ || winnr('j') != l:current_window_number
+      call assert_equal(1, l:is_horizontal_split)
+      call assert_equal(0, l:is_vertical_split)
+    endif
+    if win_id2win(l:origin_window_id) > 0
+      call win_gotoid(l:origin_window_id)
+    endif
 
     sleep 2200m
     if win_id2win(l:running_window_id) > 0
@@ -1990,6 +2005,7 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_command_output() abo
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
+    call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
     call assert_equal(l:expected_max_height, get(l:terminal, 'max_height', 0))
     call assert_true(get(l:terminal, 'height', 0) <= get(l:terminal, 'max_height', 0))
@@ -2286,6 +2302,77 @@ function! s:test_cmake_generate_reuses_build_output_window_when_possible() abort
       unlet! g:vim_cmake_naive_test_last_build_terminal
     else
       let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_generate_reuses_build_output_window_in_async_mode() abort
+  if !has('unix') || !exists('*term_getstatus')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+
+  try
+    let l:build_args_path = s:path_join(l:fixture.root, 'cmake-build-args-async-cross-reuse.txt')
+    let l:generate_args_path = s:path_join(l:fixture.root, 'cmake-generate-args-async-cross-reuse.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'if [ "$1" = "--build" ]; then',
+          \ '  printf "%s\n" "$@" > ' . shellescape(l:build_args_path),
+          \ '  echo "async-cross-reuse-build-start"',
+          \ '  sleep 1',
+          \ '  echo "async-cross-reuse-build-end"',
+          \ '  exit 0',
+          \ 'fi',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:generate_args_path),
+          \ 'echo "async-cross-reuse-generate-start"',
+          \ 'sleep 2',
+          \ 'echo "async-cross-reuse-generate-end"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#close()
+    let g:vim_cmake_naive_test_capture_build_terminal = 0
+    call vim_cmake_naive#build()
+
+    let l:first_window_id = s:wait_for_running_terminal_window(1000)
+    call assert_true(l:first_window_id > 0, 'Expected running build terminal window.')
+    call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected async build args file to be created.')
+
+    sleep 1200m
+    call vim_cmake_naive#generate()
+
+    let l:second_window_id = s:wait_for_running_terminal_window(1000)
+    call assert_true(l:second_window_id > 0, 'Expected running generate terminal window.')
+    call assert_equal(l:first_window_id, l:second_window_id)
+
+    call assert_true(s:wait_for_file(l:generate_args_path, 1000), 'Expected async generate args file to be created.')
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_equal(
+          \ ['--build', s:path_join(l:expected_root, 'build')],
+          \ s:read_non_empty_lines(l:build_args_path))
+    call assert_equal(
+          \ ['-S', l:expected_root, '-B', s:path_join(l:expected_root, 'build'), '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
+          \ s:read_non_empty_lines(l:generate_args_path))
+  finally
+    sleep 2200m
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -2591,6 +2678,7 @@ function! s:test_cmake_test_reuses_build_output_window_when_possible() abort
     let l:second_window_id = get(l:second_terminal, 'winid', 0)
     call assert_true(l:second_window_id > 0)
     call assert_equal(l:first_window_id, l:second_window_id)
+    call assert_equal(0, get(l:second_terminal, 'swapfile_enabled', 1))
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected fake cmake build args file to be created.')
@@ -2599,6 +2687,283 @@ function! s:test_cmake_test_reuses_build_output_window_when_possible() abort
     call assert_equal(['--build', s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:build_args_path))
     call assert_equal([], s:read_non_empty_lines(l:test_args_path))
     call assert_equal([s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:test_cwd_path))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_run_reports_missing_target_selection() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': '', 'build': 'Debug'})
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#run()
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'No target selected. Please use CMakeSwitchTarget command first.') >= 0)
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_run_runs_target_in_output_directory_without_preset() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': '', 'target': 'app', 'build': 'Debug'})
+
+    let l:run_directory = s:path_join(l:fixture.root, 'build')
+    let l:args_path = s:path_join(l:fixture.root, 'run-args-no-preset.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'run-cwd-no-preset.txt')
+    let l:script_path = s:path_join(l:run_directory, 'app')
+    call mkdir(l:run_directory, 'p')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'pwd > ' . shellescape(l:cwd_path),
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#run()
+
+    let l:expected_run_directory = s:normalized_path(l:run_directory)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected run args file to be created.')
+    call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected run cwd file to be created.')
+    call assert_equal([], s:read_non_empty_lines(l:args_path))
+    call assert_equal([l:expected_run_directory], s:read_non_empty_lines(l:cwd_path))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_run_runs_target_in_output_preset_directory_with_preset() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': 'dev', 'target': 'app', 'build': 'Release'})
+
+    let l:run_directory = s:path_join(l:fixture.root, 'out/build-dir/dev')
+    let l:args_path = s:path_join(l:fixture.root, 'run-args-with-preset.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'run-cwd-with-preset.txt')
+    let l:script_path = s:path_join(l:run_directory, 'app')
+    call mkdir(l:run_directory, 'p')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'pwd > ' . shellescape(l:cwd_path),
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#run()
+
+    let l:expected_run_directory = s:normalized_path(l:run_directory)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected run args file to be created.')
+    call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected run cwd file to be created.')
+    call assert_equal([], s:read_non_empty_lines(l:args_path))
+    call assert_equal([l:expected_run_directory], s:read_non_empty_lines(l:cwd_path))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_run_sets_running_terminal_name_with_preset_and_target() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'app', 'build': 'Release'})
+
+    let l:run_directory = s:path_join(l:fixture.root, 'build/dev')
+    let l:script_path = s:path_join(l:run_directory, 'app')
+    call mkdir(l:run_directory, 'p')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'echo "running-name-run-start"',
+          \ 'sleep 2',
+          \ 'echo "running-name-run-end"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#run()
+
+    let l:running_window_id = s:wait_for_running_terminal_window(1000)
+    call assert_true(l:running_window_id > 0, 'Expected running run terminal window.')
+    let l:running_buffer_number = winbufnr(win_id2win(l:running_window_id))
+    call assert_equal('cmake run --preset=dev --target=app', bufname(l:running_buffer_number))
+  finally
+    sleep 2200m
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_run_opens_horizontal_terminal_with_command_output() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': '', 'target': 'app', 'build': 'Debug'})
+
+    let l:run_directory = s:path_join(l:fixture.root, 'build')
+    let l:run_marker_path = s:path_join(l:fixture.root, 'run-preview-marker.txt')
+    let l:script_path = s:path_join(l:run_directory, 'app')
+    call mkdir(l:run_directory, 'p')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'echo "preview-run-line-1"',
+          \ 'echo "preview-run-line-2"',
+          \ 'echo "done" > ' . shellescape(l:run_marker_path),
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#run()
+
+    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
+    call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
+    call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
+    let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
+    call assert_equal(l:expected_max_height, get(l:terminal, 'max_height', 0))
+    call assert_equal('Success', get(l:terminal, 'buffer_name', ''))
+    call assert_true(s:wait_for_file(l:run_marker_path, 1000), 'Expected run preview marker file to be created.')
+  finally
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_run_reuses_build_output_window_when_possible() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:build_args_path = s:path_join(l:fixture.root, 'cmake-build-args-cross-reuse-run.txt')
+    let l:run_args_path = s:path_join(l:fixture.root, 'run-args-cross-reuse-run.txt')
+    let l:run_cwd_path = s:path_join(l:fixture.root, 'run-cwd-cross-reuse-run.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:cmake_script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:build_args_path),
+          \ 'echo "cross-reuse-build-before-run"',
+          \ 'exit 0'
+          \ ], l:cmake_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:cmake_script_path))
+
+    let l:run_directory = s:path_join(l:fixture.root, 'build')
+    let l:run_script_path = s:path_join(l:run_directory, 'app')
+    call mkdir(l:run_directory, 'p')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:run_args_path),
+          \ 'pwd > ' . shellescape(l:run_cwd_path),
+          \ 'echo "cross-reuse-run-after-build"',
+          \ 'exit 0'
+          \ ], l:run_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:run_script_path))
+
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': '', 'target': 'app', 'build': 'Debug'})
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:first_terminal = s:wait_for_captured_build_terminal_output('cross-reuse-build-before-run', 1000)
+    let l:first_window_id = get(l:first_terminal, 'winid', 0)
+    call assert_true(l:first_window_id > 0)
+
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#run()
+
+    let l:second_terminal = s:wait_for_captured_build_terminal_output('cross-reuse-run-after-build', 1000)
+    let l:second_window_id = get(l:second_terminal, 'winid', 0)
+    call assert_true(l:second_window_id > 0)
+    call assert_equal(l:first_window_id, l:second_window_id)
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected fake cmake build args file to be created.')
+    call assert_true(s:wait_for_file(l:run_args_path, 1000), 'Expected run args file to be created.')
+    call assert_true(s:wait_for_file(l:run_cwd_path, 1000), 'Expected run cwd file to be created.')
+    call assert_equal(
+          \ ['--build', s:path_join(l:expected_root, 'build'), '--target', 'app'],
+          \ s:read_non_empty_lines(l:build_args_path))
+    call assert_equal([], s:read_non_empty_lines(l:run_args_path))
+    call assert_equal([s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:run_cwd_path))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -2871,7 +3236,7 @@ function! s:test_cmake_menu_popup_lists_commands_and_executes_selection() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(
-          \ [' 1.   CMakeConfig', ' 2.   CMakeConfigDefault', ' 3.   CMakeSwitchPreset', ' 4.   CMakeSwitchBuild', ' 5.   CMakeSwitchTarget', ' 6.   CMakeGenerate', ' 7.   CMakeBuild', ' 8.   CMakeTest', ' 9.   CMakeClose', '10.   CMakeInfo', '11.   CMakeMenu', '12.   CMakeMenuFull', '13.   CMakeConfigSetOutput'],
+          \ [' 1.   CMakeConfig', ' 2.   CMakeConfigDefault', ' 3.   CMakeSwitchPreset', ' 4.   CMakeSwitchBuild', ' 5.   CMakeSwitchTarget', ' 6.   CMakeGenerate', ' 7.   CMakeBuild', ' 8.   CMakeTest', ' 9.   CMakeRun', '10.   CMakeClose', '11.   CMakeInfo', '12.   CMakeMenu', '13.   CMakeMenuFull', '14.   CMakeConfigSetOutput'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select CMake command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
@@ -2955,7 +3320,7 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
 
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_use_popup_menu = 1
-    let g:vim_cmake_naive_test_popup_menu_response = 2
+    let g:vim_cmake_naive_test_popup_menu_response = 1
     let g:vim_cmake_naive_test_menu_command_args = {}
     let g:vim_cmake_naive_test_capture_build_terminal = 1
     unlet! g:vim_cmake_naive_test_menu_response
@@ -2966,13 +3331,13 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     execute 'silent CMakeMenu'
 
     call assert_equal(
-          \ ['1.   CMakeGenerate', '2.   CMakeBuild', '3.   CMakeTest', '4.   CMakeClose', '5.   CMakeSwitchPreset', '6.   CMakeSwitchBuild', '7.   CMakeSwitchTarget'],
+          \ ['1.   CMakeBuild', '2.   CMakeRun', '3.   CMakeTest', '4.   CMakeSwitchTarget'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select CMake command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxwidth', 0))
-    call assert_equal(7, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minheight', 0))
-    call assert_equal(7, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxheight', 0))
+    call assert_equal(4, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minheight', 0))
+    call assert_equal(4, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxheight', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_menu_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_menu_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
@@ -3056,7 +3421,7 @@ function! s:test_cmake_menu_executes_command_with_arguments() abort
     call s:write_json(l:config_path, {'keep': 1})
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_use_popup_menu = 1
-    let g:vim_cmake_naive_test_popup_menu_response = 13
+    let g:vim_cmake_naive_test_popup_menu_response = 14
     let g:vim_cmake_naive_test_menu_command_args = {'CMakeConfigSetOutput': 'out/build'}
     unlet! g:vim_cmake_naive_test_menu_response
     unlet! g:vim_cmake_naive_test_inputlist_response
@@ -3108,7 +3473,7 @@ function! s:test_cmake_menu_cancels_argument_command_when_args_empty() abort
     call s:write_json(l:config_path, {'output': 'old'})
     execute 'cd ' . fnameescape(l:fixture.root)
     let g:vim_cmake_naive_test_use_popup_menu = 1
-    let g:vim_cmake_naive_test_popup_menu_response = 13
+    let g:vim_cmake_naive_test_popup_menu_response = 14
     let g:vim_cmake_naive_test_menu_command_args = {'CMakeConfigSetOutput': ''}
     unlet! g:vim_cmake_naive_test_menu_response
     unlet! g:vim_cmake_naive_test_inputlist_response
@@ -4600,6 +4965,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_sets_failure_terminal_name_with_exit_code()
   call s:test_cmake_build_reuses_visible_output_window_when_possible()
   call s:test_cmake_generate_reuses_build_output_window_when_possible()
+  call s:test_cmake_generate_reuses_build_output_window_in_async_mode()
   call s:test_cmake_build_recreates_visible_output_window_when_reuse_not_possible()
   call s:test_cmake_build_errors_when_no_cmakelists_found()
   call s:test_cmake_test_runs_ctest_in_output_directory_without_preset()
@@ -4607,6 +4973,12 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_test_sets_running_terminal_name_with_preset()
   call s:test_cmake_test_sets_running_terminal_name_without_preset()
   call s:test_cmake_test_reuses_build_output_window_when_possible()
+  call s:test_cmake_run_reports_missing_target_selection()
+  call s:test_cmake_run_runs_target_in_output_directory_without_preset()
+  call s:test_cmake_run_runs_target_in_output_preset_directory_with_preset()
+  call s:test_cmake_run_sets_running_terminal_name_with_preset_and_target()
+  call s:test_cmake_run_opens_horizontal_terminal_with_command_output()
+  call s:test_cmake_run_reuses_build_output_window_when_possible()
   call s:test_cmake_close_closes_generate_terminal_window()
   call s:test_cmake_close_closes_build_terminal_window()
   call s:test_cmake_info_popup_shows_config_as_table()
