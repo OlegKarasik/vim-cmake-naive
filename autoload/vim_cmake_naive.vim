@@ -1991,6 +1991,42 @@ function! s:run_build() abort
   call s:write_info('Started build in ' . s:relative_path(l:build_target_directory, l:project_root))
 endfunction
 
+function! s:read_first_line_from_command(argv) abort
+  let l:command_name = trim(s:to_string_or_empty(get(a:argv, 0, '')))
+  if empty(l:command_name) || !executable(l:command_name)
+    return ''
+  endif
+
+  let l:escaped_arguments = map(copy(a:argv), 'shellescape(v:val)')
+  let l:output = systemlist(join(l:escaped_arguments, ' '))
+  if v:shell_error != 0 || empty(l:output)
+    return ''
+  endif
+
+  return trim(s:to_string_or_empty(get(l:output, 0, '')))
+endfunction
+
+function! s:available_core_count() abort
+  let l:environment_value = exists('$NUMBER_OF_PROCESSORS') ? $NUMBER_OF_PROCESSORS : ''
+  let l:environment_count = str2nr(trim(s:to_string_or_empty(l:environment_value)))
+  if l:environment_count > 0
+    return l:environment_count
+  endif
+
+  let l:command_candidates = has('macunix')
+        \ ? [['sysctl', '-n', 'hw.logicalcpu'], ['sysctl', '-n', 'hw.ncpu']]
+        \ : [['nproc'], ['getconf', '_NPROCESSORS_ONLN']]
+
+  for l:candidate in l:command_candidates
+    let l:detected_count = str2nr(s:read_first_line_from_command(l:candidate))
+    if l:detected_count > 0
+      return l:detected_count
+    endif
+  endfor
+
+  return 1
+endfunction
+
 function! s:run_test() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root(l:working_directory)
@@ -2008,7 +2044,8 @@ function! s:run_test() abort
   let l:test_directory = empty(l:preset_output_directory) ? l:build_directory : l:preset_output_directory
   call mkdir(l:test_directory, 'p')
 
-  let l:argv = ['ctest']
+  let l:parallel_level = s:available_core_count()
+  let l:argv = ['ctest', '--parallel', string(l:parallel_level)]
   let l:test_terminal_name = s:cmake_test_terminal_running_name(l:preset_value)
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,

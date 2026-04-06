@@ -139,7 +139,8 @@ This command:
 - resolves test working directory from config:
   - `<output>` when preset is empty
   - `<output>/<preset>` when preset is non-empty
-- runs `ctest` without parameters in that working directory
+- detects available core count (minimum `1`)
+- runs `ctest --parallel <core_count>` in that working directory
 - opens a horizontal split terminal and starts tests there asynchronously
 - limits test terminal height to at most 10 lines and never more than half of the main window height
 - sets terminal status name while running to:

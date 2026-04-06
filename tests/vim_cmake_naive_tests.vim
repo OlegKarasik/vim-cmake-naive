@@ -129,6 +129,15 @@ function! s:read_non_empty_lines(path) abort
   return filter(readfile(a:path, 'b'), '!empty(v:val)')
 endfunction
 
+function! s:assert_ctest_parallel_args(args_lines) abort
+  call assert_equal(2, len(a:args_lines), 'Expected ctest to receive exactly two parallel arguments.')
+  call assert_equal('--parallel', get(a:args_lines, 0, ''), 'Expected ctest to receive --parallel argument.')
+  let l:parallel_level = get(a:args_lines, 1, '')
+  call assert_true(
+        \ l:parallel_level =~# '^[1-9][0-9]*$',
+        \ 'Expected ctest parallel level to be a positive integer.')
+endfunction
+
 function! s:capture_naive_cmake_environment() abort
   let l:snapshot = {}
   let l:environment = exists('*environ') ? environ() : {}
@@ -2491,7 +2500,7 @@ function! s:test_cmake_test_runs_ctest_in_output_directory_without_preset() abor
     call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
     call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
-    call assert_equal([], s:read_non_empty_lines(l:args_path))
+    call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:args_path))
     call assert_equal([l:expected_test_dir], s:read_non_empty_lines(l:cwd_path))
   finally
     let $PATH = l:initial_path
@@ -2525,7 +2534,7 @@ function! s:test_cmake_test_runs_ctest_in_output_preset_directory_with_preset() 
     let l:expected_test_dir = s:path_join(l:expected_root, 'out/build-dir/dev')
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
     call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
-    call assert_equal([], s:read_non_empty_lines(l:args_path))
+    call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:args_path))
     call assert_equal([l:expected_test_dir], s:read_non_empty_lines(l:cwd_path))
   finally
     let $PATH = l:initial_path
@@ -2568,6 +2577,7 @@ function! s:test_cmake_test_sets_running_terminal_name_with_preset() abort
     call vim_cmake_naive#test()
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:args_path))
     let l:running_window_id = s:wait_for_running_terminal_window(1000)
     call assert_true(l:running_window_id > 0, 'Expected running test terminal window.')
     let l:running_buffer_number = winbufnr(win_id2win(l:running_window_id))
@@ -2614,6 +2624,7 @@ function! s:test_cmake_test_sets_running_terminal_name_without_preset() abort
     call vim_cmake_naive#test()
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:args_path))
     let l:running_window_id = s:wait_for_running_terminal_window(1000)
     call assert_true(l:running_window_id > 0, 'Expected running test terminal window.')
     let l:running_buffer_number = winbufnr(win_id2win(l:running_window_id))
@@ -2685,7 +2696,7 @@ function! s:test_cmake_test_reuses_build_output_window_when_possible() abort
     call assert_true(s:wait_for_file(l:test_args_path, 1000), 'Expected fake ctest args file to be created.')
     call assert_true(s:wait_for_file(l:test_cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
     call assert_equal(['--build', s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:build_args_path))
-    call assert_equal([], s:read_non_empty_lines(l:test_args_path))
+    call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:test_args_path))
     call assert_equal([s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:test_cwd_path))
   finally
     let $PATH = l:initial_path
