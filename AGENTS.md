@@ -6,6 +6,8 @@
    scripts or files outside of repository directory.
 3. All errors and warnings must be issues throught the Vim build-in errors and
    warnings functionality.
+4. The plugin must be compatible with `vim-plug` and keep a standard Vim plugin
+   layout (`plugin/` and `autoload/`).
 
 # Popup Rules
 
@@ -21,11 +23,19 @@
 6. All popups with titles (which is used for selecting items) have numbers in
    front of every item and display current item with * symbol, which is placed
    between the number and item.
+7. All popups which support search must enter/exit search mode using "CTRL+I"
+   hotkey. Search in the popup items must be performed after input of every
+   character.
+8. All popups which support selection should respond to "x" and "ESC" to
+   close the popup, "j" to move down, "k" to move up, "b" and "ENTER" to make a
+   choice.
 
 # Debug Rules
 
-1. All debug operations MUST be scoped to repository directory. Never create or
+1. All operations MUST be scoped to repository directory. Never create or
    edit a file outside of repository directory.
+2. Information about vim commands and functions must be retrieved using the
+   `:help` command inside the vim. 
 
 # Asynchronous Rules
 
