@@ -91,7 +91,8 @@ This command:
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
 - opens a horizontal split terminal and starts generate there asynchronously
-- limits generate terminal height to at most 10 lines and never more than half of the main window height
+- when started from a non-terminal window, limits generate terminal height to at most 10 lines and never more than half of the main window height
+- when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
   - `cmake generate --preset=<preset>` when preset is set
   - `cmake generate` when preset is empty
@@ -114,10 +115,13 @@ This command:
   at the discovered CMake project root when none exists
 - runs `cmake --build <output>` when `preset` is empty
 - runs `cmake --build <output>/<preset>` when `preset` is non-empty
+- detects available core count (minimum `1`)
+- adds `--parallel <core_count>` to `cmake --build`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
 - opens a horizontal split terminal and starts the build there asynchronously
-- limits build terminal height to at most 10 lines and never more than half of the main window height
+- when started from a non-terminal window, limits build terminal height to at most 10 lines and never more than half of the main window height
+- when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
   - `cmake build --preset=<preset> --target=<target>` when preset and target are set
   - `cmake build --target=all` when target is empty
@@ -142,7 +146,8 @@ This command:
 - detects available core count (minimum `1`)
 - runs `ctest --parallel <core_count>` in that working directory
 - opens a horizontal split terminal and starts tests there asynchronously
-- limits test terminal height to at most 10 lines and never more than half of the main window height
+- when started from a non-terminal window, limits test terminal height to at most 10 lines and never more than half of the main window height
+- when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
   - `ctest --preset=<preset>` when preset is set
   - `ctest` when preset is empty
@@ -167,7 +172,8 @@ This command:
 - searches for an executable file matching the selected target under that run directory
 - runs the discovered executable in that run directory
 - opens a horizontal split terminal and starts execution there asynchronously
-- limits run terminal height to at most 10 lines and never more than half of the main window height
+- when started from a non-terminal window, limits run terminal height to at most 10 lines and never more than half of the main window height
+- when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
   - `cmake run --preset=<preset> --target=<target>` when preset is set
   - `cmake run --target=<target>` when preset is empty

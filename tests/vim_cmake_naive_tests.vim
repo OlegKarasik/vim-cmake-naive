@@ -138,6 +138,18 @@ function! s:assert_ctest_parallel_args(args_lines) abort
         \ 'Expected ctest parallel level to be a positive integer.')
 endfunction
 
+function! s:assert_cmake_build_parallel_args(args_lines, build_directory, ...) abort
+  call assert_true(len(a:args_lines) >= 4, 'Expected cmake build to receive --build and --parallel arguments.')
+  call assert_equal('--build', get(a:args_lines, 0, ''), 'Expected cmake build to start with --build.')
+  call assert_equal(a:build_directory, get(a:args_lines, 1, ''), 'Expected cmake build directory argument to match.')
+  call assert_equal('--parallel', get(a:args_lines, 2, ''), 'Expected cmake build to receive --parallel argument.')
+  let l:parallel_level = get(a:args_lines, 3, '')
+  call assert_true(
+        \ l:parallel_level =~# '^[1-9][0-9]*$',
+        \ 'Expected cmake build parallel level to be a positive integer.')
+  call assert_equal(a:000, a:args_lines[4:])
+endfunction
+
 function! s:capture_naive_cmake_environment() abort
   let l:snapshot = {}
   let l:environment = exists('*environ') ? environ() : {}
@@ -1523,9 +1535,9 @@ function! s:test_cmake_build_reuses_generate_output_window_when_possible() abort
     call assert_equal(
           \ ['-S', l:expected_root, '-B', s:path_join(l:expected_root, 'build'), '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ s:read_non_empty_lines(l:generate_args_path))
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:build_args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:build_args_path),
+          \ s:path_join(l:expected_root, 'build'))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -1757,9 +1769,7 @@ function! s:test_cmake_build_creates_default_config_and_invokes_cmake_build() ab
     call assert_equal('Debug', s:env_value_or_empty('VIM_NAIVE_CMAKE_BUILD'))
     call assert_false(exists('$VIM_NAIVE_CMAKE_TARGET'))
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_equal(
-          \ ['--build', l:expected_build_dir],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(s:read_non_empty_lines(l:args_path), l:expected_build_dir)
   finally
     let $PATH = l:initial_path
     call s:restore_naive_cmake_environment(l:environment_snapshot)
@@ -1802,16 +1812,13 @@ function! s:test_cmake_build_does_not_rely_on_startup_exported_environment_varia
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     let l:expected_root = s:normalized_path(l:fixture.root)
-    call assert_equal(
-          \ [
-          \   '--build',
-          \   s:path_join(l:expected_root, 'out/build-dir/dev'),
-          \   '--preset',
-          \   'dev',
-          \   '--target',
-          \   'mylib'
-          \ ],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'out/build-dir/dev'),
+          \ '--preset',
+          \ 'dev',
+          \ '--target',
+          \ 'mylib')
   finally
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -1850,16 +1857,13 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_equal(
-          \ [
-          \   '--build',
-          \   s:path_join(l:expected_root, 'out/build-dir/dev'),
-          \   '--preset',
-          \   'dev',
-          \   '--target',
-          \   'mylib'
-          \ ],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'out/build-dir/dev'),
+          \ '--preset',
+          \ 'dev',
+          \ '--target',
+          \ 'mylib')
   finally
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -2027,9 +2031,9 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_command_output() abo
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'build'))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -2089,9 +2093,9 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_ou
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'build'))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -2145,9 +2149,9 @@ function! s:test_cmake_build_sets_failure_terminal_name_with_exit_code() abort
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'build'))
 
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'Command failed with exit code 7. See build terminal window for details.') >= 0)
@@ -2223,9 +2227,88 @@ function! s:test_cmake_build_reuses_visible_output_window_when_possible() abort
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'build'))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_build_does_not_resize_when_started_from_terminal_window() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-no-terminal-resize.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'echo "origin-terminal-first-build"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:first_terminal = s:wait_for_captured_build_terminal_output('origin-terminal-first-build', 1000)
+    let l:first_window_id = get(l:first_terminal, 'winid', 0)
+    call assert_true(l:first_window_id > 0, 'Expected first build terminal window.')
+    let l:first_height = get(l:first_terminal, 'height', 0)
+    call assert_true(l:first_height > 0, 'Expected first build terminal window height to be positive.')
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'echo "origin-terminal-second-build"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+
+    call assert_true(win_gotoid(l:first_window_id), 'Expected build terminal window to become active.')
+    let l:origin_terminal_buffer = bufnr('%')
+    call assert_equal('terminal', getbufvar(l:origin_terminal_buffer, '&buftype', ''))
+
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:second_terminal = s:wait_for_captured_build_terminal_output('origin-terminal-second-build', 1000)
+    let l:second_window_id = get(l:second_terminal, 'winid', 0)
+    call assert_true(l:second_window_id > 0, 'Expected second build terminal window.')
+    call assert_equal(l:first_window_id, l:second_window_id)
+    call assert_equal(l:first_height, get(l:second_terminal, 'height', 0))
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'build'))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -2297,9 +2380,9 @@ function! s:test_cmake_generate_reuses_build_output_window_when_possible() abort
     call assert_equal(
           \ ['-S', l:expected_root, '-B', s:path_join(l:expected_root, 'build'), '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ s:read_non_empty_lines(l:generate_args_path))
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:build_args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:build_args_path),
+          \ s:path_join(l:expected_root, 'build'))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -2369,9 +2452,9 @@ function! s:test_cmake_generate_reuses_build_output_window_in_async_mode() abort
 
     call assert_true(s:wait_for_file(l:generate_args_path, 1000), 'Expected async generate args file to be created.')
     let l:expected_root = s:normalized_path(l:fixture.root)
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ s:read_non_empty_lines(l:build_args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:build_args_path),
+          \ s:path_join(l:expected_root, 'build'))
     call assert_equal(
           \ ['-S', l:expected_root, '-B', s:path_join(l:expected_root, 'build'), '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ s:read_non_empty_lines(l:generate_args_path))
@@ -2695,7 +2778,9 @@ function! s:test_cmake_test_reuses_build_output_window_when_possible() abort
     call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected fake cmake build args file to be created.')
     call assert_true(s:wait_for_file(l:test_args_path, 1000), 'Expected fake ctest args file to be created.')
     call assert_true(s:wait_for_file(l:test_cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
-    call assert_equal(['--build', s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:build_args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:build_args_path),
+          \ s:path_join(l:expected_root, 'build'))
     call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:test_args_path))
     call assert_equal([s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:test_cwd_path))
   finally
@@ -2970,9 +3055,11 @@ function! s:test_cmake_run_reuses_build_output_window_when_possible() abort
     call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected fake cmake build args file to be created.')
     call assert_true(s:wait_for_file(l:run_args_path, 1000), 'Expected run args file to be created.')
     call assert_true(s:wait_for_file(l:run_cwd_path, 1000), 'Expected run cwd file to be created.')
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build'), '--target', 'app'],
-          \ s:read_non_empty_lines(l:build_args_path))
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:build_args_path),
+          \ s:path_join(l:expected_root, 'build'),
+          \ '--target',
+          \ 'app')
     call assert_equal([], s:read_non_empty_lines(l:run_args_path))
     call assert_equal([s:path_join(l:expected_root, 'build')], s:read_non_empty_lines(l:run_cwd_path))
   finally
@@ -3363,9 +3450,9 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     let l:args_lines = filereadable(l:args_path)
           \ ? s:read_non_empty_lines(l:args_path)
           \ : []
-    call assert_equal(
-          \ ['--build', s:path_join(l:expected_root, 'build')],
-          \ l:args_lines)
+    call s:assert_cmake_build_parallel_args(
+          \ l:args_lines,
+          \ s:path_join(l:expected_root, 'build'))
   finally
     let $PATH = l:initial_path
     if l:initial_use_popup is v:null
@@ -4975,6 +5062,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_output()
   call s:test_cmake_build_sets_failure_terminal_name_with_exit_code()
   call s:test_cmake_build_reuses_visible_output_window_when_possible()
+  call s:test_cmake_build_does_not_resize_when_started_from_terminal_window()
   call s:test_cmake_generate_reuses_build_output_window_when_possible()
   call s:test_cmake_generate_reuses_build_output_window_in_async_mode()
   call s:test_cmake_build_recreates_visible_output_window_when_reuse_not_possible()

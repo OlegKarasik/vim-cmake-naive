@@ -1968,8 +1968,9 @@ function! s:run_build() abort
   let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
   let l:build_target_directory = empty(l:preset_output_directory) ? l:build_directory : l:preset_output_directory
   let l:target_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
+  let l:parallel_level = s:available_core_count()
 
-  let l:argv = ['cmake', '--build', l:build_target_directory]
+  let l:argv = ['cmake', '--build', l:build_target_directory, '--parallel', string(l:parallel_level)]
   if !empty(l:preset_value)
     call add(l:argv, '--preset')
     call add(l:argv, l:preset_value)
@@ -2599,8 +2600,10 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
     endif
   endif
   let l:origin_window_id = win_getid()
-  let l:main_window_height = winheight(0)
+  let l:origin_is_terminal_window = s:is_terminal_window(l:origin_window_id)
+  let l:main_window_height = l:origin_is_terminal_window ? 0 : winheight(0)
   let l:terminal_max_height = l:split_orientation ==# 'horizontal'
+        \ && !l:origin_is_terminal_window
         \ ? s:build_terminal_max_allowed_height(l:main_window_height)
         \ : 0
   let l:terminal_command_options = {
@@ -2612,8 +2615,14 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ 'max_height': l:terminal_max_height
         \ }
   let l:terminal = l:reuse_previous_build_window
-        \ ? s:open_previous_build_terminal_window_or_recreate(l:split_orientation, l:terminal_max_height)
-        \ : s:open_new_build_terminal_window(l:split_orientation, l:terminal_max_height)
+        \ ? s:open_previous_build_terminal_window_or_recreate(
+        \   l:split_orientation,
+        \   l:terminal_max_height,
+        \   l:origin_is_terminal_window)
+        \ : s:open_new_build_terminal_window(
+        \   l:split_orientation,
+        \   l:terminal_max_height,
+        \   l:origin_is_terminal_window)
 
   try
     try
@@ -2624,7 +2633,11 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         throw l:error_message
       endif
 
-      let l:terminal = s:replace_build_terminal_window(l:terminal.window_id, l:split_orientation, l:terminal_max_height)
+      let l:terminal = s:replace_build_terminal_window(
+            \ l:terminal.window_id,
+            \ l:split_orientation,
+            \ l:terminal_max_height,
+            \ l:origin_is_terminal_window)
       call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id, l:terminal_command_options)
     endtry
 
@@ -2639,7 +2652,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endtry
 endfunction
 
-function! s:open_previous_build_terminal_window_or_recreate(split_orientation, max_height) abort
+function! s:open_previous_build_terminal_window_or_recreate(split_orientation, max_height, skip_resize) abort
   let l:split_orientation = tolower(trim(s:to_string_or_empty(a:split_orientation)))
   if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
     throw 'Split orientation must be "vertical" or "horizontal".'
@@ -2647,16 +2660,20 @@ function! s:open_previous_build_terminal_window_or_recreate(split_orientation, m
 
   let l:previous_terminal = s:previous_build_terminal_window()
   if empty(l:previous_terminal)
-    return s:open_new_build_terminal_window(l:split_orientation, a:max_height)
+    return s:open_new_build_terminal_window(l:split_orientation, a:max_height, a:skip_resize)
   endif
 
   if get(l:previous_terminal, 'split_orientation', 'vertical') !=# l:split_orientation
-    return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation, a:max_height)
+    return s:replace_build_terminal_window(
+          \ l:previous_terminal.window_id,
+          \ l:split_orientation,
+          \ a:max_height,
+          \ a:skip_resize)
   endif
 
   if s:is_previous_build_terminal_window_reusable(l:previous_terminal)
     if win_gotoid(l:previous_terminal.window_id)
-      if l:split_orientation ==# 'horizontal'
+      if l:split_orientation ==# 'horizontal' && !a:skip_resize
         execute 'silent resize ' . max([1, a:max_height])
       endif
       let l:previous_terminal.reused_existing_window = 1
@@ -2664,19 +2681,27 @@ function! s:open_previous_build_terminal_window_or_recreate(split_orientation, m
     endif
   endif
 
-  return s:replace_build_terminal_window(l:previous_terminal.window_id, l:split_orientation, a:max_height)
+  return s:replace_build_terminal_window(
+        \ l:previous_terminal.window_id,
+        \ l:split_orientation,
+        \ a:max_height,
+        \ a:skip_resize)
 endfunction
 
-function! s:open_new_build_terminal_window(split_orientation, max_height) abort
+function! s:open_new_build_terminal_window(split_orientation, max_height, skip_resize) abort
   let l:max_height = type(a:max_height) == v:t_number
         \ ? a:max_height
         \ : str2nr(s:to_string_or_empty(a:max_height))
-  if l:max_height <= 0
+  if l:max_height <= 0 && !a:skip_resize
     let l:max_height = s:build_terminal_max_allowed_height(winheight(0))
   endif
 
   if a:split_orientation ==# 'horizontal'
-    execute 'silent keepalt botright ' . l:max_height . 'new'
+    if a:skip_resize
+      execute 'silent keepalt botright new'
+    else
+      execute 'silent keepalt botright ' . l:max_height . 'new'
+    endif
   else
     execute 'silent keepalt vertical botright new'
   endif
@@ -2691,15 +2716,18 @@ function! s:open_new_build_terminal_window(split_orientation, max_height) abort
         \ }
 endfunction
 
-function! s:replace_build_terminal_window(window_id, split_orientation, max_height) abort
+function! s:replace_build_terminal_window(window_id, split_orientation, max_height, skip_resize) abort
   if win_id2win(a:window_id) <= 0
-    return s:open_new_build_terminal_window(a:split_orientation, a:max_height)
+    return s:open_new_build_terminal_window(a:split_orientation, a:max_height, a:skip_resize)
   endif
 
   call win_gotoid(a:window_id)
   let l:old_window_id = a:window_id
   let l:old_buffer_number = bufnr('%')
-  let l:new_terminal = s:open_new_build_terminal_window(a:split_orientation, a:max_height)
+  let l:new_terminal = s:open_new_build_terminal_window(
+        \ a:split_orientation,
+        \ a:max_height,
+        \ a:skip_resize)
   if win_id2win(l:old_window_id) > 0
     call win_gotoid(l:old_window_id)
     execute 'silent! close!'
@@ -2860,6 +2888,20 @@ function! s:is_terminal_buffer_job_running(buffer_number) abort
   endif
 
   return stridx(term_getstatus(a:buffer_number), 'running') >= 0
+endfunction
+
+function! s:is_terminal_window(window_id) abort
+  let l:window_number = win_id2win(a:window_id)
+  if l:window_number <= 0
+    return 0
+  endif
+
+  let l:buffer_number = winbufnr(l:window_number)
+  if l:buffer_number <= 0 || !bufexists(l:buffer_number)
+    return 0
+  endif
+
+  return getbufvar(l:buffer_number, '&buftype', '') ==# 'terminal'
 endfunction
 
 function! s:is_terminal_build_supported() abort
