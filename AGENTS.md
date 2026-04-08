@@ -25,10 +25,11 @@
    between the number and item.
 7. All popups which support search must enter/exit search mode using "CTRL+I"
    hotkey. Search in the popup items must be performed after input of every
-   character.
-8. All popups which support selection should respond to "x" and "ESC" to
-   close the popup, "j" to move down, "k" to move up, "b" and "ENTER" to make a
-   choice.
+   character. Inside the insert mode, popup title is updated to have "(Insert)" at
+   the end.
+8. All popups which support selection should respond to "x" and "ESC" to close the
+   popup, "j" and "DOWN" to move down, "k" and "UP" to move up, "b" and "ENTER" to
+   make a choice.
 
 # Debug Rules
 

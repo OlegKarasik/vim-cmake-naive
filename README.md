@@ -227,6 +227,7 @@ This command:
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - executes the selected command
 - asks for arguments when a selected command requires them (for example `CMakeConfigSetOutput`)
+- all selection popups use the same keys: `x`/`Esc` to close, `j`/`k` to move, `b`/`Enter` to choose
 
 Switch local CMake preset from `CMakePresets.json`:
 
@@ -284,7 +285,9 @@ This command:
 - discovers selectable targets from cache key `targets`
 - prompts through a popup menu for selection (fallback to inputlist) and writes selected target to config key `target`
 - when `all` is selected, removes `target` key from local config
-- popup supports live search: start typing to filter available targets (`Backspace` removes, `Ctrl-U` clears)
+- popup search mode toggles with `Ctrl+I` (press again to exit)
+- while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
+- while search mode is active, popup title ends with `(Insert)`
 - popup entries are ordered and prefixed with a number
 - currently selected target is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors

@@ -3334,7 +3334,7 @@ function! s:test_cmake_menu_popup_lists_commands_and_executes_selection() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(
-          \ [' 1.   CMakeConfig', ' 2.   CMakeConfigDefault', ' 3.   CMakeSwitchPreset', ' 4.   CMakeSwitchBuild', ' 5.   CMakeSwitchTarget', ' 6.   CMakeGenerate', ' 7.   CMakeBuild', ' 8.   CMakeTest', ' 9.   CMakeRun', '10.   CMakeClose', '11.   CMakeInfo', '12.   CMakeMenu', '13.   CMakeMenuFull', '14.   CMakeConfigSetOutput'],
+          \ [' 1. * CMakeConfig', ' 2.   CMakeConfigDefault', ' 3.   CMakeSwitchPreset', ' 4.   CMakeSwitchBuild', ' 5.   CMakeSwitchTarget', ' 6.   CMakeGenerate', ' 7.   CMakeBuild', ' 8.   CMakeTest', ' 9.   CMakeRun', '10.   CMakeClose', '11.   CMakeInfo', '12.   CMakeMenu', '13.   CMakeMenuFull', '14.   CMakeConfigSetOutput'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select CMake command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
@@ -3346,6 +3346,7 @@ function! s:test_cmake_menu_popup_lists_commands_and_executes_selection() abort
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_menu_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderhighlight', []))
+    call assert_equal(v:t_func, type(get(g:vim_cmake_naive_test_last_menu_popup_options, 'filter', v:null)))
     call assert_true(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_use_popup is v:null
@@ -3429,7 +3430,7 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     execute 'silent CMakeMenu'
 
     call assert_equal(
-          \ ['1.   CMakeBuild', '2.   CMakeRun', '3.   CMakeTest', '4.   CMakeSwitchTarget'],
+          \ ['1. * CMakeBuild', '2.   CMakeRun', '3.   CMakeTest', '4.   CMakeSwitchTarget'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select CMake command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
@@ -3441,6 +3442,7 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_menu_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderhighlight', []))
+    call assert_equal(v:t_func, type(get(g:vim_cmake_naive_test_last_menu_popup_options, 'filter', v:null)))
     let l:terminal = s:wait_for_captured_build_terminal_output('compact-menu-build-output', 1000)
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
@@ -3927,6 +3929,7 @@ function! s:test_preset_popup_display_items_formats_ordered_list_and_current_mar
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_preset_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_preset_popup_options, 'borderhighlight', []))
+    call assert_equal(v:t_func, type(get(g:vim_cmake_naive_test_last_preset_popup_options, 'filter', v:null)))
     call assert_equal({'preset': 'dev'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -4185,6 +4188,7 @@ function! s:test_cmake_switch_build_popup_display_items_marks_current_selection(
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_build_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_build_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_build_popup_options, 'borderhighlight', []))
+    call assert_equal(v:t_func, type(get(g:vim_cmake_naive_test_last_build_popup_options, 'filter', v:null)))
     call assert_equal({'build': 'RelWithDebInfo', 'preset': 'dev', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -4813,6 +4817,7 @@ function! s:test_switch_target_popup_display_items_marks_current_selection_and_l
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderchars', []))
     call assert_equal('Pmenu', get(g:vim_cmake_naive_test_last_target_popup_options, 'highlight', ''))
     call assert_equal(['Pmenu'], get(g:vim_cmake_naive_test_last_target_popup_options, 'borderhighlight', []))
+    call assert_equal(v:t_func, type(get(g:vim_cmake_naive_test_last_target_popup_options, 'filter', v:null)))
     call assert_equal({'output': 'build', 'preset': 'dev', 'target': 't11'}, s:read_json(l:config_path))
     call assert_equal([json_encode([{'file': '../active-before-popup.cpp'}])], readfile(l:active_commands, 'b'))
   finally
@@ -4888,7 +4893,7 @@ function! s:test_switch_target_popup_filters_items_by_search_query() abort
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
     call assert_equal(['1.   mylib'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
-    call assert_equal('Select CMake target [LIB]', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
+    call assert_equal('Select CMake target [LIB] (Insert)', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxwidth', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_target_popup_options, 'minheight', 0))
