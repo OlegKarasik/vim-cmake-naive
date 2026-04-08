@@ -524,6 +524,59 @@ function! s:test_switch_reports_missing_target_directory() abort
   endtry
 endfunction
 
+function! s:assert_plugin_plug_mappings(expected_mappings) abort
+  for l:plug in sort(keys(a:expected_mappings))
+    let l:rhs = maparg(l:plug, 'n')
+    call assert_true(!empty(l:rhs), 'Expected mapping for ' . l:plug . '.')
+    call assert_true(
+          \ stridx(l:rhs, a:expected_mappings[l:plug]) >= 0,
+          \ 'Expected mapping for ' . l:plug . ' to execute ' . a:expected_mappings[l:plug] . '.')
+  endfor
+endfunction
+
+function! s:test_plugin_defines_plug_mappings_by_default() abort
+  let l:expected_mappings = {
+        \ '<Plug>(CMakeBuild)': 'CMakeBuild',
+        \ '<Plug>(CMakeClose)': 'CMakeClose',
+        \ '<Plug>(CMakeConfig)': 'CMakeConfig',
+        \ '<Plug>(CMakeConfigDefault)': 'CMakeConfigDefault',
+        \ '<Plug>(CMakeConfigSetOutput)': 'CMakeConfigSetOutput',
+        \ '<Plug>(CMakeGenerate)': 'CMakeGenerate',
+        \ '<Plug>(CMakeInfo)': 'CMakeInfo',
+        \ '<Plug>(CMakeMenu)': 'CMakeMenu',
+        \ '<Plug>(CMakeMenuFull)': 'CMakeMenuFull',
+        \ '<Plug>(CMakeRun)': 'CMakeRun',
+        \ '<Plug>(CMakeSwitchBuild)': 'CMakeSwitchBuild',
+        \ '<Plug>(CMakeSwitchPreset)': 'CMakeSwitchPreset',
+        \ '<Plug>(CMakeSwitchTarget)': 'CMakeSwitchTarget',
+        \ '<Plug>(CMakeTest)': 'CMakeTest'
+        \ }
+
+  call s:assert_plugin_plug_mappings(l:expected_mappings)
+endfunction
+
+function! s:test_plugin_registers_plug_mappings_for_commands() abort
+  let l:expected_mappings = {
+        \ '<Plug>(CMakeBuild)': 'CMakeBuild',
+        \ '<Plug>(CMakeClose)': 'CMakeClose',
+        \ '<Plug>(CMakeConfig)': 'CMakeConfig',
+        \ '<Plug>(CMakeConfigDefault)': 'CMakeConfigDefault',
+        \ '<Plug>(CMakeConfigSetOutput)': 'CMakeConfigSetOutput',
+        \ '<Plug>(CMakeGenerate)': 'CMakeGenerate',
+        \ '<Plug>(CMakeInfo)': 'CMakeInfo',
+        \ '<Plug>(CMakeMenu)': 'CMakeMenu',
+        \ '<Plug>(CMakeMenuFull)': 'CMakeMenuFull',
+        \ '<Plug>(CMakeRun)': 'CMakeRun',
+        \ '<Plug>(CMakeSwitchBuild)': 'CMakeSwitchBuild',
+        \ '<Plug>(CMakeSwitchPreset)': 'CMakeSwitchPreset',
+        \ '<Plug>(CMakeSwitchTarget)': 'CMakeSwitchTarget',
+        \ '<Plug>(CMakeTest)': 'CMakeTest'
+        \ }
+
+  call vim_cmake_naive#register_plug_mappings()
+  call s:assert_plugin_plug_mappings(l:expected_mappings)
+endfunction
+
 function! s:test_cmake_config_creates_default_local_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -5024,6 +5077,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_switch_honors_equals_style_output_directory()
   call s:test_split_reports_missing_input_file()
   call s:test_switch_reports_missing_target_directory()
+  call s:test_plugin_defines_plug_mappings_by_default()
+  call s:test_plugin_registers_plug_mappings_for_commands()
   call s:test_cmake_config_creates_default_local_config()
   call s:test_cmake_config_preserves_existing_file()
   call s:test_cmake_config_syncs_environment_when_creating_config()

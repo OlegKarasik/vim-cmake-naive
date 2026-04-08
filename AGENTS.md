@@ -1,13 +1,17 @@
 # Core Rules
 
-1. This is an independent plugin. Never introduce dependencies for other
-   plugins.
+1. This is an independent plugin. Never introduce dependencies for other plugins.
 2. All work must be done in boundries of the repository directory. Never create
    scripts or files outside of repository directory.
 3. All errors and warnings must be issues throught the Vim build-in errors and
    warnings functionality.
 4. The plugin must be compatible with `vim-plug` and keep a standard Vim plugin
    layout (`plugin/` and `autoload/`).
+5. All executable commands must support `<Plug>(<command>)` syntax to enable
+   keybindings.
+6. All plugin files/public functions should be named after the plugin, for
+   instance if plugin name is `vim-buffers-naive`, the all related files should be
+   `vim_buffers_naive*`.
 
 # Popup Rules
 

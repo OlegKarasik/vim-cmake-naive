@@ -19,3 +19,5 @@ command! -nargs=0 CMakeInfo call vim_cmake_naive#info()
 command! -nargs=0 CMakeMenu call vim_cmake_naive#menu()
 command! -nargs=0 CMakeMenuFull call vim_cmake_naive#menu_full()
 command! -nargs=+ CMakeConfigSetOutput call vim_cmake_naive#set_config_output(<q-args>)
+
+call vim_cmake_naive#register_plug_mappings()

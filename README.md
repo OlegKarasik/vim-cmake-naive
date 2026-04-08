@@ -22,6 +22,22 @@ It provides fourteen commands:
 - `:CMakeMenuFull`
 - `:CMakeConfigSetOutput <value>`
 
+## `<Plug>` support
+
+The plugin defines `<Plug>(<command>)` mappings for all `:CMake*` commands by
+default, but does not create keybindings by itself.
+
+Then map your preferred keys:
+
+```vim
+nmap <leader>cg <Plug>(CMakeGenerate)
+nmap <leader>cb <Plug>(CMakeBuild)
+nmap <leader>ct <Plug>(CMakeTest)
+```
+
+`<Plug>(CMakeConfigSetOutput)` opens `:CMakeConfigSetOutput ` in command-line mode
+so you can type the output value.
+
 ## Install (vim-plug)
 
 ```vim

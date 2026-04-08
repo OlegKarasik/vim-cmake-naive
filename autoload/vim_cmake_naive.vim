@@ -239,12 +239,35 @@ function! vim_cmake_naive#menu_full() abort
   endtry
 endfunction
 
+function! vim_cmake_naive#register_plug_mappings() abort
+  call s:register_plug_mapping('<Plug>(CMakeConfig)', ':<C-u>CMakeConfig<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeConfigDefault)', ':<C-u>CMakeConfigDefault<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeSwitchPreset)', ':<C-u>CMakeSwitchPreset<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeSwitchBuild)', ':<C-u>CMakeSwitchBuild<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeSwitchTarget)', ':<C-u>CMakeSwitchTarget<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeGenerate)', ':<C-u>CMakeGenerate<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeBuild)', ':<C-u>CMakeBuild<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeTest)', ':<C-u>CMakeTest<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeRun)', ':<C-u>CMakeRun<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeClose)', ':<C-u>CMakeClose<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeInfo)', ':<C-u>CMakeInfo<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeMenu)', ':<C-u>CMakeMenu<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeMenuFull)', ':<C-u>CMakeMenuFull<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeConfigSetOutput)', ':<C-u>CMakeConfigSetOutput<Space>')
+endfunction
+
 function! vim_cmake_naive#sync_environment_from_local_config_on_startup() abort
   try
     call s:sync_environment_from_local_config(getcwd())
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
+endfunction
+
+function! s:register_plug_mapping(lhs, rhs) abort
+  if empty(maparg(a:lhs, 'n'))
+    execute 'nnoremap <silent> ' . a:lhs . ' ' . a:rhs
+  endif
 endfunction
 
 function! s:run_info() abort
