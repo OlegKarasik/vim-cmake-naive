@@ -9,7 +9,6 @@ let s:cmake_config_output_key = 'output'
 let s:cmake_config_target_key = 'target'
 let s:cmake_config_default_build = 'Debug'
 let s:cmake_config_default_output = 'build'
-let s:cmake_environment_prefix = 'VIM_NAIVE_CMAKE_'
 let s:cmake_switch_preset_none_name = 'none'
 let s:cmake_switch_build_none_name = 'none'
 let s:cmake_switch_target_all_name = 'all'
@@ -18,6 +17,7 @@ let s:cmake_run_missing_target_error = 'No target selected. Please use CMakeSwit
 let s:cmake_switch_build_default_types = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel']
 let s:target_directory_pattern = '\v^(.{-}CMakeFiles[\\/][^\\/]+\.dir)([\\/]|$)'
 let s:is_windows = has('win32') || has('win64') || has('win32unix')
+let s:switch_popup_min_width = 10
 let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
 let s:build_terminal_max_height = 10
@@ -256,14 +256,6 @@ function! vim_cmake_naive#register_plug_mappings() abort
   call s:register_plug_mapping('<Plug>(CMakeConfigSetOutput)', ':<C-u>CMakeConfigSetOutput<Space>')
 endfunction
 
-function! vim_cmake_naive#sync_environment_from_local_config_on_startup() abort
-  try
-    call s:sync_environment_from_local_config(getcwd())
-  catch
-    call s:write_error(s:format_exception(v:exception))
-  endtry
-endfunction
-
 function! s:register_plug_mapping(lhs, rhs) abort
   if empty(maparg(a:lhs, 'n'))
     execute 'nnoremap <silent> ' . a:lhs . ' ' . a:rhs
@@ -331,7 +323,9 @@ function! s:show_info_popup(title, lines) abort
   let l:content_lines = empty(a:lines) ? [''] : copy(a:lines)
   let l:content_width = max(map(copy(l:content_lines), 'strlen(v:val)'))
   let l:title_width = strlen(a:title)
-  let l:popup_width = max([s:switch_popup_fixed_width, l:content_width, l:title_width])
+  let l:popup_width = min([
+        \ s:switch_popup_fixed_width,
+        \ max([s:switch_popup_min_width, l:content_width, l:title_width])])
   let l:popup_height = max([1, min([len(l:content_lines), s:switch_popup_max_height])])
   let l:popup_options = {
         \ 'title': a:title,
@@ -586,7 +580,6 @@ function! s:run_cmake_config() abort
   let l:config = s:default_cmake_config_payload()
   call mkdir(l:config_directory, 'p')
   call s:write_json_file(l:config_path, l:config)
-  call s:sync_environment_from_config(l:config)
 
   call s:write_info('Created ' . s:relative_path(l:config_path, l:project_root))
 endfunction
@@ -703,8 +696,7 @@ function! s:menu_commands(command_specs) abort
 endfunction
 
 function! s:show_menu_popup(prompt, commands) abort
-  let l:current_command = empty(a:commands) ? '' : a:commands[0]
-  let l:display_items = s:preset_popup_display_items(a:commands, l:current_command)
+  let l:display_items = s:menu_popup_display_items(a:commands)
   let l:popup_options = s:switch_preset_popup_options(a:prompt, a:commands)
   if exists('g:vim_cmake_naive_test_popup_menu_response')
     let g:vim_cmake_naive_test_last_menu_popup_items = copy(l:display_items)
@@ -897,6 +889,19 @@ function! s:preset_popup_display_items(items, current_preset, ...) abort
     let l:display_name = get(l:display_names, l:item, l:item)
     let l:marker = (!empty(a:current_preset) && l:item ==# a:current_preset) ? '*' : ' '
     let l:display_item = printf('%' . l:number_width . 'd.', l:index + 1) . ' ' . l:marker . ' ' . l:display_name
+    call add(l:display_items, l:display_item)
+    let l:index += 1
+  endwhile
+
+  return l:display_items
+endfunction
+
+function! s:menu_popup_display_items(items) abort
+  let l:display_items = []
+  let l:number_width = strlen(string(len(a:items)))
+  let l:index = 0
+  while l:index < len(a:items)
+    let l:display_item = printf('%' . l:number_width . 'd.', l:index + 1) . '   ' . a:items[l:index]
     call add(l:display_items, l:display_item)
     let l:index += 1
   endwhile
@@ -1121,7 +1126,7 @@ function! s:is_switch_target_popup_backspace_key(key) abort
 endfunction
 
 function! s:is_switch_target_popup_search_toggle_key(key) abort
-  return a:key ==# "\<C-I>" || a:key ==# "\<Tab>"
+  return a:key ==# "\<C-I>"
 endfunction
 
 function! s:on_switch_target_popup_filter(popup_id, key) abort
@@ -1132,9 +1137,6 @@ function! s:on_switch_target_popup_filter(popup_id, key) abort
   let l:state = s:switch_target_popup_states[a:popup_id]
   if s:is_switch_target_popup_search_toggle_key(a:key)
     let l:state.search_mode = !s:as_condition_bool(get(l:state, 'search_mode', 0))
-    if !l:state.search_mode
-      let l:state.query = ''
-    endif
     call s:refresh_switch_target_popup(a:popup_id)
     return 1
   endif
@@ -1920,7 +1922,6 @@ function! s:run_cmake_config_default() abort
 
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
-  call s:sync_environment_from_config(l:config)
 
   call s:write_info('Applied default config in ' . s:relative_path(l:config_path, l:project_root))
 endfunction
@@ -2458,7 +2459,6 @@ function! s:resolve_or_create_local_config_for_generate(start_directory, project
 
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
-  call s:sync_environment_from_config(l:config)
   call s:write_info('Created default config: ' . s:relative_path(l:config_path, a:project_root))
 
   return l:config_path
@@ -2478,7 +2478,6 @@ function! s:set_config_value(key, value, ...) abort
   let l:config[a:key] = a:value
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
-  call s:sync_environment_from_config(l:config)
 
   call s:write_info('Set ' . a:key . ' "' . a:value . '" in ' . s:relative_path(l:config_path, l:config_root))
 endfunction
@@ -2499,7 +2498,6 @@ function! s:remove_config_value(key, ...) abort
   endif
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
-  call s:sync_environment_from_config(l:config)
 
   call s:write_info('Removed ' . a:key . ' from ' . s:relative_path(l:config_path, l:config_root))
 endfunction
@@ -2512,131 +2510,6 @@ endfunction
 
 function! s:default_cmake_config_payload() abort
   return {}
-endfunction
-
-function! s:sync_environment_from_local_config(start_directory) abort
-  let l:start_directory = s:normalize_full_path(a:start_directory)
-
-  try
-    let l:config_path = s:resolve_existing_local_config_path(l:start_directory)
-  catch
-    let l:message = s:format_exception(v:exception)
-    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
-      return 0
-    endif
-    throw l:message
-  endtry
-
-  let l:config = s:read_json_object(l:config_path)
-  return s:sync_environment_from_config(l:config)
-endfunction
-
-function! s:sync_environment_from_config(config) abort
-  if type(a:config) != v:t_dict
-    throw 'Config value must be a JSON object.'
-  endif
-
-  let l:environment = s:local_config_environment_variables(a:config)
-  return s:apply_environment_variables(l:environment)
-endfunction
-
-function! s:local_config_environment_variables(config) abort
-  if type(a:config) != v:t_dict
-    throw 'Local config must be a JSON object.'
-  endif
-
-  let l:environment = {}
-  for l:key in keys(a:config)
-    let l:environment_key = s:config_environment_key_from_config_key(l:key)
-    if empty(l:environment_key)
-      continue
-    endif
-    let l:environment[l:environment_key] = s:config_environment_value(get(a:config, l:key, v:null))
-  endfor
-
-  return l:environment
-endfunction
-
-function! s:config_environment_key_from_config_key(key) abort
-  let l:key_text = toupper(s:to_string_or_empty(a:key))
-  let l:key_text = substitute(l:key_text, '[^A-Z0-9]', '_', 'g')
-  let l:key_text = substitute(l:key_text, '_\+', '_', 'g')
-  let l:key_text = substitute(l:key_text, '^_\+', '', '')
-  let l:key_text = substitute(l:key_text, '_\+$', '', '')
-  if empty(l:key_text)
-    return ''
-  endif
-
-  return s:cmake_environment_prefix . l:key_text
-endfunction
-
-function! s:config_environment_value(value) abort
-  if type(a:value) == v:t_string
-    return a:value
-  endif
-
-  if a:value is v:null
-    return ''
-  endif
-
-  if exists('v:t_bool') && type(a:value) == v:t_bool
-    return a:value == v:true ? 'true' : 'false'
-  endif
-
-  if type(a:value) == v:t_list || type(a:value) == v:t_dict
-    return json_encode(a:value)
-  endif
-
-  return string(a:value)
-endfunction
-
-function! s:is_valid_environment_variable_name(name) abort
-  let l:name = trim(s:to_string_or_empty(a:name))
-  return !empty(l:name) && l:name =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-endfunction
-
-function! s:normalize_environment_variables(environment) abort
-  if type(a:environment) != v:t_dict
-    throw 'Environment variables must be a JSON object.'
-  endif
-
-  let l:normalized_environment = {}
-  for l:key in keys(a:environment)
-    let l:key_text = trim(s:to_string_or_empty(l:key))
-    if empty(l:key_text)
-      continue
-    endif
-    if !s:is_valid_environment_variable_name(l:key_text)
-      throw 'Environment variable name is invalid: ' . l:key_text
-    endif
-    let l:normalized_environment[l:key_text] = s:to_string_or_empty(get(a:environment, l:key, ''))
-  endfor
-
-  return l:normalized_environment
-endfunction
-
-function! s:apply_environment_variables(environment) abort
-  let l:normalized_environment = s:normalize_environment_variables(a:environment)
-  let l:current_environment = exists('*environ') ? environ() : {}
-  if type(l:current_environment) != v:t_dict
-    let l:current_environment = {}
-  endif
-
-  for l:key in keys(l:current_environment)
-    if stridx(l:key, s:cmake_environment_prefix) != 0
-      continue
-    endif
-    if has_key(l:normalized_environment, l:key)
-      continue
-    endif
-    execute 'silent! unlet $' . l:key
-  endfor
-
-  for l:key in keys(l:normalized_environment)
-    execute 'let $' . l:key . ' = ' . string(l:normalized_environment[l:key])
-  endfor
-
-  return len(keys(l:normalized_environment))
 endfunction
 
 function! s:run_shell_command(argv) abort

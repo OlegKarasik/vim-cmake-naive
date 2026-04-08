@@ -3,8 +3,6 @@ if exists('g:loaded_vim_cmake_naive')
 endif
 let g:loaded_vim_cmake_naive = 1
 
-call vim_cmake_naive#sync_environment_from_local_config_on_startup()
-
 command! -nargs=0 CMakeConfig call vim_cmake_naive#cmake_config()
 command! -nargs=0 CMakeConfigDefault call vim_cmake_naive#cmake_config_default()
 command! -nargs=0 CMakeSwitchPreset call vim_cmake_naive#switch_preset()

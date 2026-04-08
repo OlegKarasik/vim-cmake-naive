@@ -2,38 +2,48 @@
 
 1. This is an independent plugin. Never introduce dependencies for other plugins.
 2. All work must be done in boundries of the repository directory. Never create
-   scripts or files outside of repository directory.
+   scripts or files outside of repository directory. Never redirect output outside
+   of repository.
 3. All errors and warnings must be issues throught the Vim build-in errors and
    warnings functionality.
 4. The plugin must be compatible with `vim-plug` and keep a standard Vim plugin
    layout (`plugin/` and `autoload/`).
 5. All executable commands must support `<Plug>(<command>)` syntax to enable
-   keybindings.
+   keybindings by default.
 6. All plugin files/public functions should be named after the plugin, for
    instance if plugin name is `vim-buffers-naive`, the all related files should be
    `vim_buffers_naive*`.
 
-# Popup Rules
+# Core Popup Rules
 
 1. All popups with titles have smooth, single line borders (as modern Vim popups).
 2. All popups with titles have standard Vim popup colours for background and
    selection.
 3. All popups with titles DO NOT have ':' at the end.
-4. All popups with titles (which is used for selecting items) have FIXED width of
-   30 symbols.
-5. All popups with titles (which is used for selecting items) have DYNAMIC height
+4. All popups with titles have MAX width of 30 symbols and MIN width of 10
+   symbols.
+5. All popups which respond to "x" and "ESC" to close the popup, "j" and "DOWN" to
+   move down, "k" and "UP" to move up, "b" and "ENTER" to make a choice.
+
+## Popup with Selection
+
+1. All popups with titles which are used for selecting items have DYNAMIC height
    to keep up to 10 lines. If there are more than 10 lines, the popup scaled to 10
    lines and supports scrolling.
-6. All popups with titles (which is used for selecting items) have numbers in
-   front of every item and display current item with * symbol, which is placed
-   between the number and item.
-7. All popups which support search must enter/exit search mode using "CTRL+I"
-   hotkey. Search in the popup items must be performed after input of every
-   character. Inside the insert mode, popup title is updated to have "(Insert)" at
-   the end.
-8. All popups which support selection should respond to "x" and "ESC" to close the
-   popup, "j" and "DOWN" to move down, "k" and "UP" to move up, "b" and "ENTER" to
-   make a choice.
+2. All popups with titles which are used for selecting items have numbers in front
+   of every item and display current item with * symbol, which is placed between
+   the number and item.
+3. All popups with titles which are used to selecting items support search must
+   enter/exit search mode using "CTRL+I" hotkey. Search in the popup items must be
+   performed after input of every character. Inside the insert mode, popup title
+   is updated to have "(Insert)" at the end. Exiting search mode retains input
+   filter.
+
+## Popup Menus
+
+1. All popups with titles which are used for menus (for instance, command
+   invocation) and do no require to restore state on repeating execution MUST to
+   no an indicator of the current item `*`.
 
 # Debug Rules
 

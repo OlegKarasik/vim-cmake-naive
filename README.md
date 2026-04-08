@@ -77,17 +77,6 @@ directory), with:
 
 If no `CMakeLists.txt` is found, the command reports an error.
 
-On plugin startup, if local config `.vim-cmake-naive-config.json` exists in current
-directory or parent directories, all config keys are exported to Vim process
-environment variables with `VIM_NAIVE_CMAKE_` prefix (uppercase key names;
-non-alphanumeric characters converted to `_`).
-
-Whenever plugin commands update local config (`:CMakeConfig`,
-`:CMakeConfigDefault`, `:CMakeConfigSet*`, `:CMakeSwitch*`, and default config
-creation inside `:CMakeGenerate`/`:CMakeBuild`/`:CMakeTest`/`:CMakeRun`), these environment variables are
-resynced immediately in Vim process. Removed config keys are removed from
-`VIM_NAIVE_CMAKE_*` environment as well.
-
 Generate CMake build system from local config:
 
 ```vim
@@ -218,6 +207,7 @@ This command:
 - reads nearest existing `.vim-cmake-naive-config.json`
 - shows popup with key/value table (`key | value`)
 - uses standard popup style (smooth single-line border, `Pmenu` colors)
+- keeps popup width within 10..30 columns
 - if config is missing, shows:
   `No configuration, please use CMakeConfigDefault to get started`
 
@@ -230,6 +220,7 @@ Open a compact popup command menu for common CMake commands:
 This command:
 - shows a popup with only these commands: `CMakeBuild`, `CMakeRun`, `CMakeTest`, `CMakeSwitchTarget`
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
+- shows numbered entries without a current-item `*` marker
 - executes the selected command
 
 Open a full popup command menu for all plugin CMake commands:
@@ -241,6 +232,7 @@ Open a full popup command menu for all plugin CMake commands:
 This command:
 - shows a popup with all available `CMake*` Ex commands from this plugin
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
+- shows numbered entries without a current-item `*` marker
 - executes the selected command
 - asks for arguments when a selected command requires them (for example `CMakeConfigSetOutput`)
 - all selection popups use the same keys: `x`/`Esc` to close, `j`/`k` to move, `b`/`Enter` to choose
@@ -304,6 +296,7 @@ This command:
 - popup search mode toggles with `Ctrl+I` (press again to exit)
 - while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
 - while search mode is active, popup title ends with `(Insert)`
+- exiting search mode keeps the current filter result
 - popup entries are ordered and prefixed with a number
 - currently selected target is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
@@ -324,7 +317,6 @@ Set local CMake output in `.vim-cmake-naive-config.json`:
 This updates the nearest existing `.vim-cmake-naive-config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
-It also updates `VIM_NAIVE_CMAKE_OUTPUT` in Vim process environment.
 
 ## Notes
 
