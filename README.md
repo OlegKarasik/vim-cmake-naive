@@ -320,6 +320,7 @@ This command:
 - popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 - copies selected target `compile_commands.json` to `<output>/compile_commands.json`
 - when `all` is selected, copies root `compile_commands.json` to `<output>/compile_commands.json`
+- updates root `.vim-cmake-naive-target` with selected target name (`all` for the `(all)` selection)
 - if cache file is missing, command reports:
   `No cache found. Please run CMakeGenerate command first.`
 
@@ -332,11 +333,16 @@ Set local CMake output in `.vim-cmake-naive-config.json`:
 
 This updates the nearest existing `.vim-cmake-naive-config.json` in current
 directory or parent directories. If no local config exists, the command reports
-an error (run `:CMakeConfig` or `:CMakeConfigDefault` first).
+an error (run `:CMakeConfig` or `:CMakeConfigDefault` first). It also updates
+root `.vim-cmake-naive-output` with the build directory path relative to the
+root (`<output>` or `<output>/<preset>`).
 
 ## Notes
 
 - Errors are reported through Vim messages with a `[vim-cmake-naive]` prefix.
+- Integration files are maintained at project root:
+  - `.vim-cmake-naive-target`: currently selected target name (`all` when unset)
+  - `.vim-cmake-naive-output`: current build directory path relative to root
 - All `:CMake*` commands use a shared lock. If another `:CMake*` command is in
   progress, command start is rejected with:
   `CMake: another command <command> is already running`.

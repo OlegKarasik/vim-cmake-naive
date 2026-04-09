@@ -3,6 +3,8 @@ let s:default_output_filename = 'compile_commands.json'
 let s:cmake_config_filename = '.vim-cmake-naive-config.json'
 let s:cmake_presets_filename = 'CMakePresets.json'
 let s:cmake_cache_filename = '.vim-cmake-naive-cache.json'
+let s:cmake_target_state_filename = '.vim-cmake-naive-target'
+let s:cmake_output_state_filename = '.vim-cmake-naive-output'
 let s:cmake_config_preset_key = 'preset'
 let s:cmake_config_build_config_key = 'build'
 let s:cmake_config_output_key = 'output'
@@ -583,6 +585,7 @@ function! s:run_cmake_config() abort
   let l:config = s:default_cmake_config_payload()
   call mkdir(l:config_directory, 'p')
   call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
 
   call s:write_info('Created ' . s:relative_path(l:config_path, l:project_root))
 endfunction
@@ -2270,6 +2273,7 @@ function! s:run_cmake_config_default() abort
 
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
 
   call s:write_info('Applied default config in ' . s:relative_path(l:config_path, l:project_root))
 endfunction
@@ -2807,6 +2811,7 @@ function! s:resolve_or_create_local_config_for_generate(start_directory, project
 
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
   call s:write_info('Created default config: ' . s:relative_path(l:config_path, a:project_root))
 
   return l:config_path
@@ -2826,6 +2831,7 @@ function! s:set_config_value(key, value, ...) abort
   let l:config[a:key] = a:value
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
 
   call s:write_info('Set ' . a:key . ' "' . a:value . '" in ' . s:relative_path(l:config_path, l:config_root))
 endfunction
@@ -2846,6 +2852,7 @@ function! s:remove_config_value(key, ...) abort
   endif
   call mkdir(fnamemodify(l:config_path, ':h'), 'p')
   call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
 
   call s:write_info('Removed ' . a:key . ' from ' . s:relative_path(l:config_path, l:config_root))
 endfunction
@@ -3588,6 +3595,71 @@ endfunction
 
 function! s:cmake_presets_path(project_root) abort
   return s:path_join(a:project_root, s:cmake_presets_filename)
+endfunction
+
+function! s:cmake_target_state_path(config_path) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+
+  return s:path_join(fnamemodify(a:config_path, ':h'), s:cmake_target_state_filename)
+endfunction
+
+function! s:cmake_output_state_path(config_path) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+
+  return s:path_join(fnamemodify(a:config_path, ':h'), s:cmake_output_state_filename)
+endfunction
+
+function! s:integration_target_value(config) abort
+  if type(a:config) != v:t_dict
+    throw 'Config payload must be a JSON object.'
+  endif
+
+  let l:target_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_target_key, '')))
+  return empty(l:target_value) ? s:cmake_switch_target_all_name : l:target_value
+endfunction
+
+function! s:integration_build_directory_relative_path(config_path, config) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if type(a:config) != v:t_dict
+    throw 'Config payload must be a JSON object.'
+  endif
+
+  let l:config_root = s:normalize_full_path(fnamemodify(a:config_path, ':h'))
+  let l:output_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_output_key, s:cmake_config_default_output)))
+  if empty(l:output_value)
+    let l:output_value = s:cmake_config_default_output
+  endif
+
+  let l:preset_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_preset_key, '')))
+  let l:build_directory = s:resolve_path(l:output_value, l:config_root)
+  if !empty(l:preset_value)
+    let l:build_directory = s:resolve_path(l:preset_value, l:build_directory)
+  endif
+
+  return s:relative_path(l:build_directory, l:config_root)
+endfunction
+
+function! s:update_local_integration_files(config_path, config) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if type(a:config) != v:t_dict
+    throw 'Config payload must be a JSON object.'
+  endif
+
+  let l:target_path = s:cmake_target_state_path(a:config_path)
+  let l:output_path = s:cmake_output_state_path(a:config_path)
+  let l:target_value = s:integration_target_value(a:config)
+  let l:output_value = s:integration_build_directory_relative_path(a:config_path, a:config)
+  call mkdir(fnamemodify(l:target_path, ':h'), 'p')
+  call writefile([l:target_value], l:target_path, 'b')
+  call writefile([l:output_value], l:output_path, 'b')
 endfunction
 
 function! s:resolve_switch_target_directory(target_name, build_directory) abort

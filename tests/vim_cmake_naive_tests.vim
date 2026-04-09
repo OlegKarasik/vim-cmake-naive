@@ -640,8 +640,11 @@ function! s:test_cmake_set_config_output_creates_config_with_value() abort
     execute 'silent CMakeConfigSetOutput build'
 
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
     call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'output': 'build'}, s:read_json(l:config_path))
+    call assert_true(filereadable(l:output_state_path), 'Expected .vim-cmake-naive-output to be created.')
+    call assert_equal(['build'], readfile(l:output_state_path, 'b'))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -654,6 +657,7 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
 
     execute 'cd ' . fnameescape(l:fixture.root)
@@ -662,6 +666,8 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
     call assert_equal(
           \ {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'out/build'},
           \ s:read_json(l:config_path))
+    call assert_true(filereadable(l:output_state_path), 'Expected .vim-cmake-naive-output to be created.')
+    call assert_equal(['out/build/debug'], readfile(l:output_state_path, 'b'))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -686,12 +692,17 @@ function! s:test_cmake_set_commands_use_nearest_existing_local_config() abort
 
     let l:root_config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     let l:deep_config_path = s:path_join(l:deep_dir, '.vim-cmake-naive-config.json')
+    let l:root_output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
+    let l:deep_output_state_path = s:path_join(l:deep_dir, '.vim-cmake-naive-output')
     let l:config = s:read_json(l:root_config_path)
 
     call assert_equal('release', get(l:config, 'preset', ''))
     call assert_equal('RelWithDebInfo', get(l:config, 'build', ''))
     call assert_equal('out/build', get(l:config, 'output', ''))
     call assert_false(filereadable(l:deep_config_path), 'Set commands should update nearest existing parent config, not create nested config.')
+    call assert_true(filereadable(l:root_output_state_path), 'Expected .vim-cmake-naive-output at project root.')
+    call assert_equal(['out/build/release'], readfile(l:root_output_state_path, 'b'))
+    call assert_false(filereadable(l:deep_output_state_path), 'Expected no .vim-cmake-naive-output in nested directory.')
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -4287,11 +4298,14 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
     execute 'silent CMakeSwitchTarget'
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
+    let l:target_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-target')
     call assert_equal(
           \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'keep': 1},
           \ s:read_json(l:config_path))
     call assert_true(filereadable(l:active_commands))
     call assert_equal(readfile(l:target_lib_commands, 'b'), readfile(l:active_commands, 'b'))
+    call assert_true(filereadable(l:target_state_path), 'Expected .vim-cmake-naive-target to be created.')
+    call assert_equal(['mylib'], readfile(l:target_state_path, 'b'))
   finally
     if l:initial_selection is v:null
       unlet! g:vim_cmake_naive_test_inputlist_response
@@ -4333,11 +4347,14 @@ function! s:test_cmake_switch_target_selects_all_and_removes_target_key() abort
     execute 'silent CMakeSwitchTarget'
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
+    let l:target_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-target')
     call assert_equal(
           \ {'output': 'build', 'preset': 'dev', 'keep': 1},
           \ s:read_json(l:config_path))
     call assert_true(filereadable(l:active_commands))
     call assert_equal(readfile(l:root_commands, 'b'), readfile(l:active_commands, 'b'))
+    call assert_true(filereadable(l:target_state_path), 'Expected .vim-cmake-naive-target to be created.')
+    call assert_equal(['all'], readfile(l:target_state_path, 'b'))
   finally
     if l:initial_selection is v:null
       unlet! g:vim_cmake_naive_test_inputlist_response

@@ -22,8 +22,8 @@
 3. All popups with titles DO NOT have ':' at the end.
 4. All popups with titles have MAX width of 30 symbols and MIN width of 10
    symbols.
-5. All popups which respond to "x" and "ESC" to close the popup, "j" and "DOWN" to
-   move down, "k" and "UP" to move up, "b" and "ENTER" to make a choice.
+5. All popups which respond to `x` and `ESC` to close the popup, `j` and `DOWN` to
+   move down, `k` and `UP` to move up, `b` and `ENTER` to make a choice.
 
 ## Popup with Selection
 
@@ -34,10 +34,14 @@
    of every item and display current item with * symbol, which is placed between
    the number and item.
 3. All popups with titles which are used to selecting items support search must
-   enter/exit search mode using "CTRL+I" hotkey. Search in the popup items must be
-   performed after input of every character. Inside the insert mode, popup title
-   is updated to have "(Insert)" at the end. Exiting search mode retains input
-   filter. Also, in search mode popup support `CTRL+U` (to clear the filter).
+   enter/exit search mode using `CTRL+I` hotkey. 
+   1. Search in the popup items must be performed after input of every character. 
+   2. Inside the insert mode, popup title is updated to have "(Insert)" at the
+      end. 
+   3. Exiting search mode retains input filter. 
+   4. In search mode popup support `CTRL+U` (to clear the filter).
+   5. In search mode `x`, `b` and other single character hotkeys are treated as
+      characters, not hotkeys.
 
 ## Popup Menus
 
@@ -57,6 +61,16 @@
 1. All long running operations (invocation of external tools) must be
    asynchronous.
 2. All asynchronous operations use vim terminal feature.
+
+# Integration
+
+To provide integration points for other plugins, the plugin does the following:
+1. Every time the target is updated in local configuration, in the root directory
+   the `.vim-cmake-naive-target` file is updated (or created if not exist) with
+   the name of the target as the content (without quotes and so on).
+2. Every time the build directory path is changes, in the root directory the
+   `.vim-cmake-naive-output` file is updated (or created if not exist) with the
+   relative to the root directory path to the build directory. 
 
 # Concepts
 
