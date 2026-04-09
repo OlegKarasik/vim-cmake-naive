@@ -21,7 +21,10 @@ let s:switch_popup_min_width = 10
 let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
 let s:build_terminal_max_height = 10
+let s:switch_preset_popup_states = {}
+let s:switch_build_popup_states = {}
 let s:switch_target_popup_states = {}
+let s:menu_popup_states = {}
 let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:last_cmake_build_window_id = -1
 let s:last_cmake_build_buffer_number = -1
@@ -696,17 +699,48 @@ function! s:menu_commands(command_specs) abort
 endfunction
 
 function! s:show_menu_popup(prompt, commands) abort
-  let l:display_items = s:menu_popup_display_items(a:commands)
-  let l:popup_options = s:switch_preset_popup_options(a:prompt, a:commands)
+  let l:state = {
+        \ 'prompt': a:prompt,
+        \ 'all_items': copy(a:commands),
+        \ 'filtered_items': copy(a:commands),
+        \ 'query': '',
+        \ 'search_mode': 0
+        \ }
   if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let l:test_response = g:vim_cmake_naive_test_popup_menu_response
+    let l:test_result = l:test_response
+    if type(l:test_response) == v:t_dict
+      let l:state.query = s:to_string_or_empty(get(l:test_response, 'query', ''))
+      let l:state.search_mode = s:as_condition_bool(get(l:test_response, 'search_mode', !empty(l:state.query)))
+      let l:test_result = get(l:test_response, 'result', 0)
+    endif
+    let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+    let l:display_items = s:menu_popup_display_items(l:state.filtered_items)
+    if empty(l:display_items)
+      let l:display_items = ['1.   no matches']
+    endif
+    let l:popup_options = s:menu_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
     let g:vim_cmake_naive_test_last_menu_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_menu_popup_options = copy(l:popup_options)
-    return s:selected_menu_command_from_popup_result(copy(a:commands), g:vim_cmake_naive_test_popup_menu_response)
+    return s:selected_menu_command_from_popup_result(l:state.filtered_items, l:test_result)
   endif
 
-  let l:popup_options.callback = function('s:on_menu_popup_selection', [copy(a:commands)])
-  call popup_menu(l:display_items, l:popup_options)
+  let l:display_items = s:menu_popup_display_items(l:state.filtered_items)
+  let l:popup_options = s:menu_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
+  let l:popup_id = popup_menu(l:display_items, l:popup_options)
+  if type(l:popup_id) == v:t_number && l:popup_id > 0
+    let s:menu_popup_states[l:popup_id] = l:state
+  endif
   return ''
+endfunction
+
+function! s:menu_popup_options(prompt, display_items, query, search_mode) abort
+  let l:popup_options = s:switch_popup_options(
+        \ s:switch_target_popup_title(a:prompt, a:query, a:search_mode),
+        \ a:display_items)
+  let l:popup_options.callback = function('s:on_menu_popup_selection')
+  let l:popup_options.filter = function('s:on_menu_popup_filter')
+  return l:popup_options
 endfunction
 
 function! s:selected_menu_command_from_popup_result(commands, result) abort
@@ -721,13 +755,95 @@ function! s:selected_menu_command_from_popup_result(commands, result) abort
   return a:commands[l:index - 1]
 endfunction
 
-function! s:on_menu_popup_selection(commands, _popup_id, result) abort
-  let l:selected_command = s:selected_menu_command_from_popup_result(a:commands, a:result)
+function! s:on_menu_popup_selection(popup_id, result) abort
+  if has_key(s:menu_popup_states, a:popup_id)
+    let l:state = s:menu_popup_states[a:popup_id]
+    call remove(s:menu_popup_states, a:popup_id)
+  else
+    let l:state = {}
+  endif
+  let l:selected_command = s:selected_menu_command_from_popup_result(get(l:state, 'filtered_items', []), a:result)
   if empty(l:selected_command)
     return
   endif
 
   call s:execute_menu_command(l:selected_command)
+endfunction
+
+function! s:on_menu_popup_filter(popup_id, key) abort
+  if !has_key(s:menu_popup_states, a:popup_id)
+    return s:on_selection_popup_filter(a:popup_id, a:key)
+  endif
+
+  let l:state = s:menu_popup_states[a:popup_id]
+  if s:is_switch_target_popup_search_toggle_key(a:key)
+    let l:state.search_mode = !s:as_condition_bool(get(l:state, 'search_mode', 0))
+    call s:refresh_menu_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_selection_popup_close_key(a:key)
+    call popup_close(a:popup_id, 0)
+    return 1
+  endif
+
+  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  if l:mapped_selection_key !=# a:key
+    return popup_filter_menu(a:popup_id, l:mapped_selection_key)
+  endif
+
+  if !s:as_condition_bool(get(l:state, 'search_mode', 0))
+    return popup_filter_menu(a:popup_id, a:key)
+  endif
+
+  if s:is_switch_target_popup_text_key(a:key)
+    let l:state.query .= a:key
+    call s:refresh_menu_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_switch_target_popup_backspace_key(a:key)
+    let l:query_length = strchars(l:state.query)
+    if l:query_length > 0
+      let l:state.query = strcharpart(l:state.query, 0, l:query_length - 1)
+      call s:refresh_menu_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  if a:key ==# "\<C-U>"
+    if !empty(l:state.query)
+      let l:state.query = ''
+      call s:refresh_menu_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  return popup_filter_menu(a:popup_id, a:key)
+endfunction
+
+function! s:refresh_menu_popup(popup_id) abort
+  let l:state = get(s:menu_popup_states, a:popup_id, {})
+  if empty(l:state)
+    return
+  endif
+
+  let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+  let l:display_items = s:menu_popup_display_items(l:state.filtered_items)
+  if empty(l:display_items)
+    let l:display_items = ['1.   no matches']
+  endif
+  let l:popup_options = s:menu_popup_options(
+        \ l:state.prompt,
+        \ l:display_items,
+        \ l:state.query,
+        \ get(l:state, 'search_mode', 0))
+  call popup_settext(a:popup_id, l:display_items)
+  call popup_setoptions(a:popup_id, {
+        \ 'title': l:popup_options.title,
+        \ 'minheight': l:popup_options.minheight,
+        \ 'maxheight': l:popup_options.maxheight
+        \ })
 endfunction
 
 function! s:execute_menu_command(command_name) abort
@@ -807,19 +923,37 @@ function! s:should_use_popup_menu_for_preset_selection() abort
 endfunction
 
 function! s:show_switch_preset_popup(prompt, items, current_preset) abort
-  let l:display_items = s:preset_popup_display_items(
-        \ a:items,
-        \ a:current_preset,
-        \ {s:cmake_switch_preset_none_name: '(' . s:cmake_switch_preset_none_name . ')'})
-  let l:popup_options = s:switch_preset_popup_options(a:prompt, a:items)
+  let l:state = {
+        \ 'prompt': a:prompt,
+        \ 'all_items': copy(a:items),
+        \ 'filtered_items': copy(a:items),
+        \ 'query': '',
+        \ 'search_mode': 0,
+        \ 'current_preset': a:current_preset
+        \ }
   if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let l:test_response = g:vim_cmake_naive_test_popup_menu_response
+    let l:test_result = l:test_response
+    if type(l:test_response) == v:t_dict
+      let l:state.query = s:to_string_or_empty(get(l:test_response, 'query', ''))
+      let l:state.search_mode = s:as_condition_bool(get(l:test_response, 'search_mode', !empty(l:state.query)))
+      let l:test_result = get(l:test_response, 'result', 0)
+    endif
+    let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+    let l:display_items = s:switch_preset_popup_display_items(l:state.filtered_items, l:state.current_preset)
+    let l:popup_options = s:switch_preset_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
     let g:vim_cmake_naive_test_last_preset_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_preset_popup_options = copy(l:popup_options)
-    call s:on_switch_preset_popup_selection(copy(a:items), 0, g:vim_cmake_naive_test_popup_menu_response)
+    call s:apply_switch_preset_popup_selection(l:state, l:test_result)
     return
   endif
 
-  call popup_menu(l:display_items, l:popup_options)
+  let l:display_items = s:switch_preset_popup_display_items(l:state.filtered_items, l:state.current_preset)
+  let l:popup_options = s:switch_preset_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
+  let l:popup_id = popup_menu(l:display_items, l:popup_options)
+  if type(l:popup_id) == v:t_number && l:popup_id > 0
+    let s:switch_preset_popup_states[l:popup_id] = l:state
+  endif
 endfunction
 
 function! s:switch_popup_height(items) abort
@@ -873,10 +1007,24 @@ function! s:on_selection_popup_filter(popup_id, key) abort
   return popup_filter_menu(a:popup_id, s:selection_popup_filter_key(a:key))
 endfunction
 
-function! s:switch_preset_popup_options(prompt, items) abort
-  let l:popup_options = s:switch_popup_options(a:prompt, a:items)
-  let l:popup_options.callback = function('s:on_switch_preset_popup_selection', [copy(a:items)])
+function! s:switch_preset_popup_options(prompt, display_items, query, search_mode) abort
+  let l:popup_options = s:switch_popup_options(
+        \ s:switch_target_popup_title(a:prompt, a:query, a:search_mode),
+        \ a:display_items)
+  let l:popup_options.callback = function('s:on_switch_preset_popup_selection')
+  let l:popup_options.filter = function('s:on_switch_preset_popup_filter')
   return l:popup_options
+endfunction
+
+function! s:switch_preset_popup_display_items(items, current_preset) abort
+  if empty(a:items)
+    return ['1.   no matches']
+  endif
+
+  return s:preset_popup_display_items(
+        \ a:items,
+        \ a:current_preset,
+        \ {s:cmake_switch_preset_none_name: '(' . s:cmake_switch_preset_none_name . ')'})
 endfunction
 
 function! s:preset_popup_display_items(items, current_preset, ...) abort
@@ -909,16 +1057,100 @@ function! s:menu_popup_display_items(items) abort
   return l:display_items
 endfunction
 
-function! s:on_switch_preset_popup_selection(items, _popup_id, result) abort
+function! s:on_switch_preset_popup_selection(popup_id, result) abort
+  if has_key(s:switch_preset_popup_states, a:popup_id)
+    let l:state = s:switch_preset_popup_states[a:popup_id]
+    call remove(s:switch_preset_popup_states, a:popup_id)
+  else
+    let l:state = {}
+  endif
+  call s:apply_switch_preset_popup_selection(l:state, a:result)
+endfunction
+
+function! s:on_switch_preset_popup_filter(popup_id, key) abort
+  if !has_key(s:switch_preset_popup_states, a:popup_id)
+    return s:on_selection_popup_filter(a:popup_id, a:key)
+  endif
+
+  let l:state = s:switch_preset_popup_states[a:popup_id]
+  if s:is_switch_target_popup_search_toggle_key(a:key)
+    let l:state.search_mode = !s:as_condition_bool(get(l:state, 'search_mode', 0))
+    call s:refresh_switch_preset_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_selection_popup_close_key(a:key)
+    call popup_close(a:popup_id, 0)
+    return 1
+  endif
+
+  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  if l:mapped_selection_key !=# a:key
+    return popup_filter_menu(a:popup_id, l:mapped_selection_key)
+  endif
+
+  if !s:as_condition_bool(get(l:state, 'search_mode', 0))
+    return popup_filter_menu(a:popup_id, a:key)
+  endif
+
+  if s:is_switch_target_popup_text_key(a:key)
+    let l:state.query .= a:key
+    call s:refresh_switch_preset_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_switch_target_popup_backspace_key(a:key)
+    let l:query_length = strchars(l:state.query)
+    if l:query_length > 0
+      let l:state.query = strcharpart(l:state.query, 0, l:query_length - 1)
+      call s:refresh_switch_preset_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  if a:key ==# "\<C-U>"
+    if !empty(l:state.query)
+      let l:state.query = ''
+      call s:refresh_switch_preset_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  return popup_filter_menu(a:popup_id, a:key)
+endfunction
+
+function! s:refresh_switch_preset_popup(popup_id) abort
+  let l:state = get(s:switch_preset_popup_states, a:popup_id, {})
+  if empty(l:state)
+    return
+  endif
+
+  let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+  let l:display_items = s:switch_preset_popup_display_items(l:state.filtered_items, l:state.current_preset)
+  let l:popup_options = s:switch_preset_popup_options(
+        \ l:state.prompt,
+        \ l:display_items,
+        \ l:state.query,
+        \ get(l:state, 'search_mode', 0))
+  call popup_settext(a:popup_id, l:display_items)
+  call popup_setoptions(a:popup_id, {
+        \ 'title': l:popup_options.title,
+        \ 'minheight': l:popup_options.minheight,
+        \ 'maxheight': l:popup_options.maxheight
+        \ })
+endfunction
+
+function! s:apply_switch_preset_popup_selection(state, result) abort
+  let l:items = get(a:state, 'filtered_items', [])
   let l:index = type(a:result) == v:t_number
         \ ? a:result
         \ : str2nr(s:to_string_or_empty(a:result))
-  if l:index <= 0 || l:index > len(a:items)
+  if l:index <= 0 || l:index > len(l:items)
     call s:write_info('Preset selection canceled.')
     return
   endif
 
-  let l:selected_preset = a:items[l:index - 1]
+  let l:selected_preset = l:items[l:index - 1]
   try
     call s:apply_switch_preset_selection(l:selected_preset)
   catch
@@ -927,37 +1159,153 @@ function! s:on_switch_preset_popup_selection(items, _popup_id, result) abort
 endfunction
 
 function! s:show_switch_build_popup(prompt, items, current_build) abort
-  let l:display_items = s:preset_popup_display_items(
-        \ a:items,
-        \ a:current_build,
-        \ {s:cmake_switch_build_none_name: '(' . s:cmake_switch_build_none_name . ')'})
-  let l:popup_options = s:switch_build_popup_options(a:prompt, a:items)
+  let l:state = {
+        \ 'prompt': a:prompt,
+        \ 'all_items': copy(a:items),
+        \ 'filtered_items': copy(a:items),
+        \ 'query': '',
+        \ 'search_mode': 0,
+        \ 'current_build': a:current_build
+        \ }
   if exists('g:vim_cmake_naive_test_popup_menu_response')
+    let l:test_response = g:vim_cmake_naive_test_popup_menu_response
+    let l:test_result = l:test_response
+    if type(l:test_response) == v:t_dict
+      let l:state.query = s:to_string_or_empty(get(l:test_response, 'query', ''))
+      let l:state.search_mode = s:as_condition_bool(get(l:test_response, 'search_mode', !empty(l:state.query)))
+      let l:test_result = get(l:test_response, 'result', 0)
+    endif
+    let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+    let l:display_items = s:switch_build_popup_display_items(l:state.filtered_items, l:state.current_build)
+    let l:popup_options = s:switch_build_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
     let g:vim_cmake_naive_test_last_build_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_build_popup_options = copy(l:popup_options)
-    call s:on_switch_build_popup_selection(copy(a:items), 0, g:vim_cmake_naive_test_popup_menu_response)
+    call s:apply_switch_build_popup_selection(l:state, l:test_result)
     return
   endif
 
-  call popup_menu(l:display_items, l:popup_options)
+  let l:display_items = s:switch_build_popup_display_items(l:state.filtered_items, l:state.current_build)
+  let l:popup_options = s:switch_build_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
+  let l:popup_id = popup_menu(l:display_items, l:popup_options)
+  if type(l:popup_id) == v:t_number && l:popup_id > 0
+    let s:switch_build_popup_states[l:popup_id] = l:state
+  endif
 endfunction
 
-function! s:switch_build_popup_options(prompt, items) abort
-  let l:popup_options = s:switch_popup_options(a:prompt, a:items)
-  let l:popup_options.callback = function('s:on_switch_build_popup_selection', [copy(a:items)])
+function! s:switch_build_popup_options(prompt, display_items, query, search_mode) abort
+  let l:popup_options = s:switch_popup_options(
+        \ s:switch_target_popup_title(a:prompt, a:query, a:search_mode),
+        \ a:display_items)
+  let l:popup_options.callback = function('s:on_switch_build_popup_selection')
+  let l:popup_options.filter = function('s:on_switch_build_popup_filter')
   return l:popup_options
 endfunction
 
-function! s:on_switch_build_popup_selection(items, _popup_id, result) abort
+function! s:switch_build_popup_display_items(items, current_build) abort
+  if empty(a:items)
+    return ['1.   no matches']
+  endif
+
+  return s:preset_popup_display_items(
+        \ a:items,
+        \ a:current_build,
+        \ {s:cmake_switch_build_none_name: '(' . s:cmake_switch_build_none_name . ')'})
+endfunction
+
+function! s:on_switch_build_popup_selection(popup_id, result) abort
+  if has_key(s:switch_build_popup_states, a:popup_id)
+    let l:state = s:switch_build_popup_states[a:popup_id]
+    call remove(s:switch_build_popup_states, a:popup_id)
+  else
+    let l:state = {}
+  endif
+  call s:apply_switch_build_popup_selection(l:state, a:result)
+endfunction
+
+function! s:on_switch_build_popup_filter(popup_id, key) abort
+  if !has_key(s:switch_build_popup_states, a:popup_id)
+    return s:on_selection_popup_filter(a:popup_id, a:key)
+  endif
+
+  let l:state = s:switch_build_popup_states[a:popup_id]
+  if s:is_switch_target_popup_search_toggle_key(a:key)
+    let l:state.search_mode = !s:as_condition_bool(get(l:state, 'search_mode', 0))
+    call s:refresh_switch_build_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_selection_popup_close_key(a:key)
+    call popup_close(a:popup_id, 0)
+    return 1
+  endif
+
+  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  if l:mapped_selection_key !=# a:key
+    return popup_filter_menu(a:popup_id, l:mapped_selection_key)
+  endif
+
+  if !s:as_condition_bool(get(l:state, 'search_mode', 0))
+    return popup_filter_menu(a:popup_id, a:key)
+  endif
+
+  if s:is_switch_target_popup_text_key(a:key)
+    let l:state.query .= a:key
+    call s:refresh_switch_build_popup(a:popup_id)
+    return 1
+  endif
+
+  if s:is_switch_target_popup_backspace_key(a:key)
+    let l:query_length = strchars(l:state.query)
+    if l:query_length > 0
+      let l:state.query = strcharpart(l:state.query, 0, l:query_length - 1)
+      call s:refresh_switch_build_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  if a:key ==# "\<C-U>"
+    if !empty(l:state.query)
+      let l:state.query = ''
+      call s:refresh_switch_build_popup(a:popup_id)
+    endif
+    return 1
+  endif
+
+  return popup_filter_menu(a:popup_id, a:key)
+endfunction
+
+function! s:refresh_switch_build_popup(popup_id) abort
+  let l:state = get(s:switch_build_popup_states, a:popup_id, {})
+  if empty(l:state)
+    return
+  endif
+
+  let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
+  let l:display_items = s:switch_build_popup_display_items(l:state.filtered_items, l:state.current_build)
+  let l:popup_options = s:switch_build_popup_options(
+        \ l:state.prompt,
+        \ l:display_items,
+        \ l:state.query,
+        \ get(l:state, 'search_mode', 0))
+  call popup_settext(a:popup_id, l:display_items)
+  call popup_setoptions(a:popup_id, {
+        \ 'title': l:popup_options.title,
+        \ 'minheight': l:popup_options.minheight,
+        \ 'maxheight': l:popup_options.maxheight
+        \ })
+endfunction
+
+function! s:apply_switch_build_popup_selection(state, result) abort
+  let l:items = get(a:state, 'filtered_items', [])
   let l:index = type(a:result) == v:t_number
         \ ? a:result
         \ : str2nr(s:to_string_or_empty(a:result))
-  if l:index <= 0 || l:index > len(a:items)
+  if l:index <= 0 || l:index > len(l:items)
     call s:write_info('Build selection canceled.')
     return
   endif
 
-  let l:selected_build = a:items[l:index - 1]
+  let l:selected_build = l:items[l:index - 1]
   try
     call s:apply_switch_build_selection(l:selected_build)
   catch

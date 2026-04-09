@@ -8,11 +8,11 @@
    warnings functionality.
 4. The plugin must be compatible with `vim-plug` and keep a standard Vim plugin
    layout (`plugin/` and `autoload/`).
-5. All executable commands must support `<Plug>(<command>)` syntax to enable
-   keybindings by default.
-6. All plugin files/public functions should be named after the plugin, for
-   instance if plugin name is `vim-buffers-naive`, the all related files should be
-   `vim_buffers_naive*`.
+5. All public executable commands must support `<Plug>(<command>)` syntax to
+   enable keybindings by default.
+6. All plugin files/internal function should be named after the plugin, for
+   instance if plugin name is `vim-buffers-naive`, then all related files should
+   be `vim_buffers_naive*`.
 
 # Core Popup Rules
 
@@ -37,7 +37,7 @@
    enter/exit search mode using "CTRL+I" hotkey. Search in the popup items must be
    performed after input of every character. Inside the insert mode, popup title
    is updated to have "(Insert)" at the end. Exiting search mode retains input
-   filter.
+   filter. Also, in search mode popup support `CTRL+U` (to clear the filter).
 
 ## Popup Menus
 

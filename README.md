@@ -220,6 +220,10 @@ Open a compact popup command menu for common CMake commands:
 This command:
 - shows a popup with only these commands: `CMakeBuild`, `CMakeRun`, `CMakeTest`, `CMakeSwitchTarget`
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
+- popup search mode toggles with `Ctrl+I` (press again to exit)
+- while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
+- while search mode is active, popup title ends with `(Insert)`
+- exiting search mode keeps the current filter result
 - shows numbered entries without a current-item `*` marker
 - executes the selected command
 
@@ -232,6 +236,10 @@ Open a full popup command menu for all plugin CMake commands:
 This command:
 - shows a popup with all available `CMake*` Ex commands from this plugin
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
+- popup search mode toggles with `Ctrl+I` (press again to exit)
+- while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
+- while search mode is active, popup title ends with `(Insert)`
+- exiting search mode keeps the current filter result
 - shows numbered entries without a current-item `*` marker
 - executes the selected command
 - asks for arguments when a selected command requires them (for example `CMakeConfigSetOutput`)
@@ -251,6 +259,10 @@ This command:
 - prompts through a popup menu for selection (fallback to menu/inputlist) and applies the selected preset directly
 - when a preset other than `none` is selected, removes `build` key from local config
 - when `none` is selected, removes `preset` key from local config
+- popup search mode toggles with `Ctrl+I` (press again to exit)
+- while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
+- while search mode is active, popup title ends with `(Insert)`
+- exiting search mode keeps the current filter result
 - popup entries are ordered and prefixed with a number
 - currently selected preset is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
@@ -272,6 +284,10 @@ This command:
 - prompts through a popup menu for selection (fallback to menu/inputlist) and applies the selected build type directly
 - removes `preset` key from local config after applying selected build type
 - when `none` is selected, removes `build` key from local config
+- popup search mode toggles with `Ctrl+I` (press again to exit)
+- while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
+- while search mode is active, popup title ends with `(Insert)`
+- exiting search mode keeps the current filter result
 - popup entries are ordered and prefixed with a number
 - currently selected build type is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
