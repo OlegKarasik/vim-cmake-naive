@@ -730,6 +730,35 @@ function! s:test_cmake_set_commands_error_when_no_local_config_found() abort
   endtry
 endfunction
 
+function! s:test_cmake_set_commands_do_not_use_parent_project_config() abort
+  let l:outer_fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:inner_root = s:path_join(l:outer_fixture.root, 'inner')
+    let l:inner_deep_dir = s:path_join(l:inner_root, 'src')
+    let l:outer_config_path = s:path_join(l:outer_fixture.root, '.vim-cmake-naive-config.json')
+    let l:inner_config_path = s:path_join(l:inner_root, '.vim-cmake-naive-config.json')
+    call mkdir(l:inner_deep_dir, 'p')
+    call writefile(
+          \ ['cmake_minimum_required(VERSION 3.20)', 'project(vim_cmake_naive_inner_test)'],
+          \ s:path_join(l:inner_root, 'CMakeLists.txt'),
+          \ 'b')
+    call s:write_json(l:outer_config_path, {'output': 'outer-build', 'keep': 1})
+
+    execute 'cd ' . fnameescape(l:inner_deep_dir)
+    call vim_cmake_naive#set_config_output('inner-build')
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, '.vim-cmake-naive-config.json not found in current directory or any parent directory.') >= 0)
+    call assert_false(filereadable(l:inner_config_path))
+    call assert_equal({'output': 'outer-build', 'keep': 1}, s:read_json(l:outer_config_path))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:outer_fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_commands_report_running_command_lock() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -3189,13 +3218,13 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     execute 'silent CMakeMenu'
 
     call assert_equal(
-          \ ['1.   CMakeBuild', '2.   CMakeRun', '3.   CMakeTest', '4.   CMakeSwitchTarget'],
+          \ ['1.   CMakeBuild', '2.   CMakeRun', '3.   CMakeTest', '4.   CMakeSwitchTarget', '5.   CMakeSwitchPreset'],
           \ get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
     call assert_equal('Select command', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxwidth', 0))
-    call assert_equal(4, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minheight', 0))
-    call assert_equal(4, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxheight', 0))
+    call assert_equal(5, get(g:vim_cmake_naive_test_last_menu_popup_options, 'minheight', 0))
+    call assert_equal(5, get(g:vim_cmake_naive_test_last_menu_popup_options, 'maxheight', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_menu_popup_options, 'scrollbar', 0))
     call assert_equal([1, 1, 1, 1], get(g:vim_cmake_naive_test_last_menu_popup_options, 'border', []))
     call assert_equal(['─', '│', '─', '│', '╭', '╮', '╯', '╰'], get(g:vim_cmake_naive_test_last_menu_popup_options, 'borderchars', []))
@@ -4671,6 +4700,29 @@ function! s:test_cmake_switch_target_reports_missing_cache_file() abort
   endtry
 endfunction
 
+function! s:test_cmake_switch_target_reports_cache_without_targets_key() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:cache_path = s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+    call s:write_json(l:cache_path, {'keep': 1})
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#switch_target()
+
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'key "targets" must be a JSON array.') >= 0)
+    call assert_true(stridx(l:messages, l:cache_path) >= 0)
+    call assert_false(has_key(s:read_json(l:config_path), 'target'))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_switch_target_cancels_without_changing_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -5292,6 +5344,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_set_config_output_preserves_other_keys()
   call s:test_cmake_set_commands_use_nearest_existing_local_config()
   call s:test_cmake_set_commands_error_when_no_local_config_found()
+  call s:test_cmake_set_commands_do_not_use_parent_project_config()
   call s:test_cmake_commands_report_running_command_lock()
   call s:test_cmake_command_lock_resets_after_command_failure()
   call s:test_cmake_command_lock_persists_while_async_terminal_command_runs()
@@ -5369,6 +5422,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_target_selects_all_and_removes_target_key()
   call s:test_cmake_switch_target_popup_sets_selected_target()
   call s:test_cmake_switch_target_reports_missing_cache_file()
+  call s:test_cmake_switch_target_reports_cache_without_targets_key()
   call s:test_cmake_switch_target_cancels_without_changing_config()
   call s:test_cmake_switch_target_inputlist_fallback_displays_parenthesized_all()
   call s:test_cmake_switch_target_reports_missing_build_directory()

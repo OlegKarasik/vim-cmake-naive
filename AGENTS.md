@@ -72,7 +72,8 @@ window:
 3. `CMakeRun`
 4. `CMakeGenerate`
 
-Terminal output is shown in the Vim preview window.
+Terminal output is shown in the Vim preview window. Preview window is created at
+the bottom.
 
 # Commands
 
@@ -253,6 +254,7 @@ Terminal output is shown in the Vim preview window.
    2. `CMakeRun`
    3. `CMakeTest`
    4. `CMakeSwitchTarget`
+   5. `CMakeSwitchPreset`
 2. Uses [Command Menu Popup](#command-menu-popup) when popup support exists;
    otherwise list/menu fallback.
 3. Runs selected command with `silent`.

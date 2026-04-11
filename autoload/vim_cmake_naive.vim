@@ -56,7 +56,8 @@ let s:cmake_menu_compact_command_specs = [
       \ {'name': 'CMakeBuild', 'needs_args': 0},
       \ {'name': 'CMakeRun', 'needs_args': 0},
       \ {'name': 'CMakeTest', 'needs_args': 0},
-      \ {'name': 'CMakeSwitchTarget', 'needs_args': 0}
+      \ {'name': 'CMakeSwitchTarget', 'needs_args': 0},
+      \ {'name': 'CMakeSwitchPreset', 'needs_args': 0}
       \ ]
 
 function! s:active_running_cmake_command() abort
@@ -303,11 +304,13 @@ function! s:run_info() abort
   let l:title = 'CMake info'
 
   try
-    let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
+    let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+    let l:config_path = s:resolve_existing_local_config_path(l:working_directory, l:project_root)
     let l:config = s:read_json_object(l:config_path)
   catch
     let l:message = s:format_exception(v:exception)
     if stridx(l:message, s:cmake_missing_local_config_error) < 0
+          \ && stridx(l:message, 'CMakeLists.txt not found in current directory or any parent directory.') < 0
       throw l:message
     endif
     let l:config_exists = 0
@@ -645,7 +648,7 @@ function! s:run_switch_preset() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root(getcwd())
   let l:selection_prompt = 'Select preset'
-  let l:current_preset = s:current_config_preset_for_switch(l:working_directory)
+  let l:current_preset = s:current_config_preset_for_switch(l:working_directory, l:project_root)
   if empty(l:current_preset)
     let l:current_preset = s:cmake_switch_preset_none_name
   endif
@@ -660,7 +663,9 @@ function! s:run_switch_preset() abort
   call insert(l:available_presets, s:cmake_switch_preset_none_name)
 
   if s:should_use_popup_menu_for_preset_selection()
-    call s:show_switch_preset_popup(l:selection_prompt, l:available_presets, l:current_preset)
+    if s:show_switch_preset_popup(l:selection_prompt, l:available_presets, l:current_preset)
+      call s:hold_running_cmake_command_lock('CMakeSwitchPreset')
+    endif
     return
   endif
 
@@ -678,8 +683,9 @@ endfunction
 
 function! s:run_switch_build() abort
   let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(getcwd())
   let l:selection_prompt = 'Select build'
-  let l:current_build = s:current_config_build_for_switch(l:working_directory)
+  let l:current_build = s:current_config_build_for_switch(l:working_directory, l:project_root)
   let l:available_builds = copy(s:cmake_switch_build_default_types)
   call insert(l:available_builds, s:cmake_switch_build_none_name)
   if empty(l:current_build)
@@ -687,7 +693,9 @@ function! s:run_switch_build() abort
   endif
 
   if s:should_use_popup_menu_for_preset_selection()
-    call s:show_switch_build_popup(l:selection_prompt, l:available_builds, l:current_build)
+    if s:show_switch_build_popup(l:selection_prompt, l:available_builds, l:current_build)
+      call s:hold_running_cmake_command_lock('CMakeSwitchBuild')
+    endif
     return
   endif
 
@@ -818,7 +826,7 @@ function! s:on_menu_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  if s:is_selection_popup_close_key(a:key)
+  if s:is_selection_popup_close_key(a:key, get(l:state, 'search_mode', 0))
     call popup_close(a:popup_id, 0)
     return 1
   endif
@@ -920,14 +928,20 @@ function! s:menu_command_arguments(command_name) abort
   return input('Arguments for ' . a:command_name . ': ')
 endfunction
 
-function! s:current_config_preset_for_switch(start_directory) abort
-  let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
+function! s:current_config_preset_for_switch(start_directory, ...) abort
+  let l:project_root = a:0 > 0 ? s:to_string_or_empty(a:1) : ''
+  let l:config_path = empty(trim(l:project_root))
+        \ ? s:resolve_existing_local_config_path(a:start_directory)
+        \ : s:resolve_existing_local_config_path(a:start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
   return trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
 endfunction
 
-function! s:current_config_build_for_switch(start_directory) abort
-  let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
+function! s:current_config_build_for_switch(start_directory, ...) abort
+  let l:project_root = a:0 > 0 ? s:to_string_or_empty(a:1) : ''
+  let l:config_path = empty(trim(l:project_root))
+        \ ? s:resolve_existing_local_config_path(a:start_directory)
+        \ : s:resolve_existing_local_config_path(a:start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
   return trim(s:to_string_or_empty(get(l:config, s:cmake_config_build_config_key, '')))
 endfunction
@@ -965,7 +979,7 @@ function! s:show_switch_preset_popup(prompt, items, current_preset) abort
     let g:vim_cmake_naive_test_last_preset_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_preset_popup_options = copy(l:popup_options)
     call s:apply_switch_preset_popup_selection(l:state, l:test_result)
-    return
+    return 0
   endif
 
   let l:display_items = s:switch_preset_popup_display_items(l:state.filtered_items, l:state.current_preset)
@@ -973,7 +987,9 @@ function! s:show_switch_preset_popup(prompt, items, current_preset) abort
   let l:popup_id = popup_menu(l:display_items, l:popup_options)
   if type(l:popup_id) == v:t_number && l:popup_id > 0
     let s:switch_preset_popup_states[l:popup_id] = l:state
+    return 1
   endif
+  return 0
 endfunction
 
 function! s:switch_popup_height(items) abort
@@ -997,8 +1013,17 @@ function! s:switch_popup_options(prompt, items) abort
         \ }
 endfunction
 
-function! s:is_selection_popup_close_key(key) abort
-  return a:key ==# 'x' || a:key ==# "\<Esc>"
+function! s:is_selection_popup_close_key(key, ...) abort
+  let l:search_mode = a:0 > 0 ? s:as_condition_bool(a:1) : 0
+  if a:key ==# "\<Esc>"
+    return 1
+  endif
+
+  if a:key ==# 'x'
+    return l:search_mode ? 0 : 1
+  endif
+
+  return 0
 endfunction
 
 function! s:is_selection_popup_confirm_key(key) abort
@@ -1021,7 +1046,7 @@ function! s:selection_popup_filter_key(key, ...) abort
 endfunction
 
 function! s:on_selection_popup_filter(popup_id, key) abort
-  if s:is_selection_popup_close_key(a:key)
+  if s:is_selection_popup_close_key(a:key, 0)
     call popup_close(a:popup_id, 0)
     return 1
   endif
@@ -1080,13 +1105,17 @@ function! s:menu_popup_display_items(items) abort
 endfunction
 
 function! s:on_switch_preset_popup_selection(popup_id, result) abort
-  if has_key(s:switch_preset_popup_states, a:popup_id)
-    let l:state = s:switch_preset_popup_states[a:popup_id]
-    call remove(s:switch_preset_popup_states, a:popup_id)
-  else
-    let l:state = {}
-  endif
-  call s:apply_switch_preset_popup_selection(l:state, a:result)
+  try
+    if has_key(s:switch_preset_popup_states, a:popup_id)
+      let l:state = s:switch_preset_popup_states[a:popup_id]
+      call remove(s:switch_preset_popup_states, a:popup_id)
+    else
+      let l:state = {}
+    endif
+    call s:apply_switch_preset_popup_selection(l:state, a:result)
+  finally
+    call s:release_running_cmake_command_lock('CMakeSwitchPreset')
+  endtry
 endfunction
 
 function! s:on_switch_preset_popup_filter(popup_id, key) abort
@@ -1101,7 +1130,8 @@ function! s:on_switch_preset_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  if s:is_selection_popup_close_key(a:key)
+  if s:is_selection_popup_close_key(a:key, get(l:state, 'search_mode', 0))
+    call s:release_running_cmake_command_lock('CMakeSwitchPreset')
     call popup_close(a:popup_id, 0)
     return 1
   endif
@@ -1205,7 +1235,7 @@ function! s:show_switch_build_popup(prompt, items, current_build) abort
     let g:vim_cmake_naive_test_last_build_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_build_popup_options = copy(l:popup_options)
     call s:apply_switch_build_popup_selection(l:state, l:test_result)
-    return
+    return 0
   endif
 
   let l:display_items = s:switch_build_popup_display_items(l:state.filtered_items, l:state.current_build)
@@ -1213,7 +1243,9 @@ function! s:show_switch_build_popup(prompt, items, current_build) abort
   let l:popup_id = popup_menu(l:display_items, l:popup_options)
   if type(l:popup_id) == v:t_number && l:popup_id > 0
     let s:switch_build_popup_states[l:popup_id] = l:state
+    return 1
   endif
+  return 0
 endfunction
 
 function! s:switch_build_popup_options(prompt, display_items, query, search_mode) abort
@@ -1237,13 +1269,17 @@ function! s:switch_build_popup_display_items(items, current_build) abort
 endfunction
 
 function! s:on_switch_build_popup_selection(popup_id, result) abort
-  if has_key(s:switch_build_popup_states, a:popup_id)
-    let l:state = s:switch_build_popup_states[a:popup_id]
-    call remove(s:switch_build_popup_states, a:popup_id)
-  else
-    let l:state = {}
-  endif
-  call s:apply_switch_build_popup_selection(l:state, a:result)
+  try
+    if has_key(s:switch_build_popup_states, a:popup_id)
+      let l:state = s:switch_build_popup_states[a:popup_id]
+      call remove(s:switch_build_popup_states, a:popup_id)
+    else
+      let l:state = {}
+    endif
+    call s:apply_switch_build_popup_selection(l:state, a:result)
+  finally
+    call s:release_running_cmake_command_lock('CMakeSwitchBuild')
+  endtry
 endfunction
 
 function! s:on_switch_build_popup_filter(popup_id, key) abort
@@ -1258,7 +1294,8 @@ function! s:on_switch_build_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  if s:is_selection_popup_close_key(a:key)
+  if s:is_selection_popup_close_key(a:key, get(l:state, 'search_mode', 0))
+    call s:release_running_cmake_command_lock('CMakeSwitchBuild')
     call popup_close(a:popup_id, 0)
     return 1
   endif
@@ -1361,10 +1398,10 @@ endfunction
 
 function! s:run_switch_target() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
+  let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:config_path = s:resolve_existing_local_config_path(l:working_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
   let l:selection_prompt = 'Select target'
-  let l:project_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   let l:current_target = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
@@ -1385,13 +1422,15 @@ function! s:run_switch_target() abort
   let l:scan_directory = s:target_scan_directory(l:build_directory, l:preset_value)
 
   if s:should_use_popup_menu_for_preset_selection()
-    call s:show_switch_target_popup(
+    if s:show_switch_target_popup(
           \ l:selection_prompt,
           \ l:targets,
           \ l:current_target,
           \ l:preset_value,
           \ l:build_directory,
           \ l:scan_directory)
+      call s:hold_running_cmake_command_lock('CMakeSwitchTarget')
+    endif
     return
   endif
 
@@ -1433,7 +1472,7 @@ function! s:show_switch_target_popup(prompt, items, current_target, preset_value
     let g:vim_cmake_naive_test_last_target_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_target_popup_options = copy(l:popup_options)
     call s:apply_switch_target_popup_selection(l:state, l:test_result)
-    return
+    return 0
   endif
 
   let l:display_items = s:switch_target_popup_display_items(l:state.filtered_items, l:state.current_target)
@@ -1441,7 +1480,9 @@ function! s:show_switch_target_popup(prompt, items, current_target, preset_value
   let l:popup_id = popup_menu(l:display_items, l:popup_options)
   if type(l:popup_id) == v:t_number && l:popup_id > 0
     let s:switch_target_popup_states[l:popup_id] = l:state
+    return 1
   endif
+  return 0
 endfunction
 
 function! s:switch_target_popup_options(prompt, display_items, query, search_mode) abort
@@ -1514,7 +1555,8 @@ function! s:on_switch_target_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  if s:is_selection_popup_close_key(a:key)
+  if s:is_selection_popup_close_key(a:key, get(l:state, 'search_mode', 0))
+    call s:release_running_cmake_command_lock('CMakeSwitchTarget')
     call popup_close(a:popup_id, 0)
     return 1
   endif
@@ -1578,13 +1620,17 @@ function! s:refresh_switch_target_popup(popup_id) abort
 endfunction
 
 function! s:on_switch_target_popup_selection(popup_id, result) abort
-  if has_key(s:switch_target_popup_states, a:popup_id)
-    let l:state = s:switch_target_popup_states[a:popup_id]
-    call remove(s:switch_target_popup_states, a:popup_id)
-  else
-    let l:state = {}
-  endif
-  call s:apply_switch_target_popup_selection(l:state, a:result)
+  try
+    if has_key(s:switch_target_popup_states, a:popup_id)
+      let l:state = s:switch_target_popup_states[a:popup_id]
+      call remove(s:switch_target_popup_states, a:popup_id)
+    else
+      let l:state = {}
+    endif
+    call s:apply_switch_target_popup_selection(l:state, a:result)
+  finally
+    call s:release_running_cmake_command_lock('CMakeSwitchTarget')
+  endtry
 endfunction
 
 function! s:apply_switch_target_popup_selection(state, result) abort
@@ -1637,7 +1683,11 @@ function! s:cached_targets_for_switch(config_path) abort
   endif
 
   let l:cache_payload = s:read_json_object(l:cache_path)
-  let l:targets = get(l:cache_payload, 'targets', [])
+  if !has_key(l:cache_payload, 'targets')
+    throw 'Cache file ''' . l:cache_path . ''' key "targets" must be a JSON array.'
+  endif
+
+  let l:targets = l:cache_payload.targets
   if type(l:targets) != v:t_list
     throw 'Cache file ''' . l:cache_path . ''' key "targets" must be a JSON array.'
   endif
@@ -2815,16 +2865,28 @@ function! s:resolve_cmake_project_root(start_directory) abort
   throw 'CMakeLists.txt not found in current directory or any parent directory.'
 endfunction
 
-function! s:resolve_existing_local_config_path(start_directory) abort
+function! s:resolve_existing_local_config_path(start_directory, ...) abort
   let l:current = s:normalize_full_path(a:start_directory)
   if !isdirectory(l:current)
     throw 'Current directory not found: ' . l:current
+  endif
+
+  let l:search_root = ''
+  if a:0 > 0
+    let l:search_root = s:normalize_full_path(a:1)
+    if !isdirectory(l:search_root)
+      throw 'Current directory not found: ' . l:search_root
+    endif
   endif
 
   while 1
     let l:config_path = s:cmake_config_path(l:current)
     if filereadable(l:config_path)
       return l:config_path
+    endif
+
+    if !empty(l:search_root) && s:path_equals(l:current, l:search_root)
+      break
     endif
 
     let l:parent = s:trim_path(fnamemodify(l:current, ':h'))
@@ -2839,7 +2901,7 @@ endfunction
 
 function! s:resolve_or_create_local_config_for_generate(start_directory, project_root) abort
   try
-    return s:resolve_existing_local_config_path(a:start_directory)
+    return s:resolve_existing_local_config_path(a:start_directory, a:project_root)
   catch
     let l:message = s:format_exception(v:exception)
     if stridx(l:message, s:cmake_missing_local_config_error) < 0
@@ -2862,9 +2924,10 @@ endfunction
 function! s:set_config_value(key, value, ...) abort
   let l:require_existing = get(a:000, 0, 0)
   let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
   let l:config_path = l:require_existing
-        \ ? s:resolve_existing_local_config_path(l:working_directory)
-        \ : s:cmake_config_path(l:working_directory)
+        \ ? s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+        \ : s:cmake_config_path(l:project_root)
   let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:config = filereadable(l:config_path)
         \ ? s:read_json_object(l:config_path)
@@ -2881,9 +2944,10 @@ endfunction
 function! s:remove_config_value(key, ...) abort
   let l:require_existing = get(a:000, 0, 0)
   let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
   let l:config_path = l:require_existing
-        \ ? s:resolve_existing_local_config_path(l:working_directory)
-        \ : s:cmake_config_path(l:working_directory)
+        \ ? s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+        \ : s:cmake_config_path(l:project_root)
   let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:config = filereadable(l:config_path)
         \ ? s:read_json_object(l:config_path)
