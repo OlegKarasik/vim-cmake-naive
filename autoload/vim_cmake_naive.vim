@@ -22,20 +22,20 @@ let s:is_windows = has('win32') || has('win64') || has('win32unix')
 let s:switch_popup_min_width = 10
 let s:switch_popup_fixed_width = 30
 let s:switch_popup_max_height = 10
+let s:info_popup_max_width = 100
 let s:build_terminal_max_height = 10
 let s:switch_preset_popup_states = {}
 let s:switch_build_popup_states = {}
 let s:switch_target_popup_states = {}
 let s:menu_popup_states = {}
 let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
-let s:last_cmake_build_window_id = -1
-let s:last_cmake_build_buffer_number = -1
-let s:last_cmake_build_split_orientation = 'vertical'
+let s:last_cmake_terminal_windows_by_group = {}
 let s:build_terminal_success_callbacks = {}
 let s:running_cmake_command_name = ''
+let s:keep_running_cmake_command_lock = 0
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
-let s:cmake_menu_prompt = 'Select CMake command'
+let s:cmake_menu_prompt = 'Select command'
 let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeConfig', 'needs_args': 0},
       \ {'name': 'CMakeConfigDefault', 'needs_args': 0},
@@ -74,11 +74,38 @@ function! s:run_cmake_command(command_name, command_funcref, command_args) abort
   endif
 
   let s:running_cmake_command_name = a:command_name
+  let s:keep_running_cmake_command_lock = 0
   try
     return call(a:command_funcref, a:command_args)
   finally
-    let s:running_cmake_command_name = ''
+    if !s:keep_running_cmake_command_lock
+      let s:running_cmake_command_name = ''
+    endif
+    let s:keep_running_cmake_command_lock = 0
   endtry
+endfunction
+
+function! s:hold_running_cmake_command_lock(command_name) abort
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  if empty(l:command_name)
+    return
+  endif
+
+  if s:running_cmake_command_name ==# l:command_name
+    let s:keep_running_cmake_command_lock = 1
+  endif
+endfunction
+
+function! s:release_running_cmake_command_lock(command_name) abort
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  if empty(l:command_name)
+    return
+  endif
+
+  if s:running_cmake_command_name ==# l:command_name
+    let s:running_cmake_command_name = ''
+  endif
+  let s:keep_running_cmake_command_lock = 0
 endfunction
 
 function! vim_cmake_naive#split(...) abort
@@ -300,7 +327,7 @@ endfunction
 function! s:config_table_lines(config) abort
   let l:config_keys = keys(a:config)
   if empty(l:config_keys)
-    return ['No values found in local configuration']
+    return []
   endif
 
   call sort(l:config_keys)
@@ -329,7 +356,7 @@ function! s:show_info_popup(title, lines) abort
   let l:content_width = max(map(copy(l:content_lines), 'strlen(v:val)'))
   let l:title_width = strlen(a:title)
   let l:popup_width = min([
-        \ s:switch_popup_fixed_width,
+        \ s:info_popup_max_width,
         \ max([s:switch_popup_min_width, l:content_width, l:title_width])])
   let l:popup_height = max([1, min([len(l:content_lines), s:switch_popup_max_height])])
   let l:popup_options = {
@@ -617,7 +644,11 @@ endfunction
 function! s:run_switch_preset() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root(getcwd())
-  let l:selection_prompt = 'Select CMake preset'
+  let l:selection_prompt = 'Select preset'
+  let l:current_preset = s:current_config_preset_for_switch(l:working_directory)
+  if empty(l:current_preset)
+    let l:current_preset = s:cmake_switch_preset_none_name
+  endif
   let l:presets_path = s:cmake_presets_path(l:project_root)
   if !filereadable(l:presets_path)
     throw s:cmake_presets_filename . ' not found at project root: ' . l:presets_path
@@ -626,10 +657,6 @@ function! s:run_switch_preset() abort
   let l:presets_payload = s:read_json_object(l:presets_path)
   let l:available_presets = s:available_configure_presets(l:presets_payload, l:project_root)
   call sort(l:available_presets)
-  let l:current_preset = s:current_config_preset_for_switch(l:working_directory)
-  if empty(l:current_preset)
-    let l:current_preset = s:cmake_switch_preset_none_name
-  endif
   call insert(l:available_presets, s:cmake_switch_preset_none_name)
 
   if s:should_use_popup_menu_for_preset_selection()
@@ -637,7 +664,10 @@ function! s:run_switch_preset() abort
     return
   endif
 
-  let l:selected_preset = s:select_item_from_menu(l:selection_prompt, l:available_presets)
+  let l:selected_preset = s:select_item_from_menu(
+        \ l:selection_prompt,
+        \ l:available_presets,
+        \ {s:cmake_switch_preset_none_name: '(' . s:cmake_switch_preset_none_name . ')'})
   if empty(l:selected_preset)
     call s:write_info('Preset selection canceled.')
     return
@@ -648,7 +678,7 @@ endfunction
 
 function! s:run_switch_build() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:selection_prompt = 'Select CMake build'
+  let l:selection_prompt = 'Select build'
   let l:current_build = s:current_config_build_for_switch(l:working_directory)
   let l:available_builds = copy(s:cmake_switch_build_default_types)
   call insert(l:available_builds, s:cmake_switch_build_none_name)
@@ -661,7 +691,10 @@ function! s:run_switch_build() abort
     return
   endif
 
-  let l:selected_build = s:select_item_from_menu(l:selection_prompt, l:available_builds)
+  let l:selected_build = s:select_item_from_menu(
+        \ l:selection_prompt,
+        \ l:available_builds,
+        \ {s:cmake_switch_build_none_name: '(' . s:cmake_switch_build_none_name . ')'})
   if empty(l:selected_build)
     call s:write_info('Build selection canceled.')
     return
@@ -790,7 +823,9 @@ function! s:on_menu_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  let l:mapped_selection_key = s:selection_popup_filter_key(
+        \ a:key,
+        \ get(l:state, 'search_mode', 0))
   if l:mapped_selection_key !=# a:key
     return popup_filter_menu(a:popup_id, l:mapped_selection_key)
   endif
@@ -886,31 +921,13 @@ function! s:menu_command_arguments(command_name) abort
 endfunction
 
 function! s:current_config_preset_for_switch(start_directory) abort
-  try
-    let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
-  catch
-    let l:message = s:format_exception(v:exception)
-    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
-      return ''
-    endif
-    throw l:message
-  endtry
-
+  let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
   let l:config = s:read_json_object(l:config_path)
   return trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
 endfunction
 
 function! s:current_config_build_for_switch(start_directory) abort
-  try
-    let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
-  catch
-    let l:message = s:format_exception(v:exception)
-    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
-      return ''
-    endif
-    throw l:message
-  endtry
-
+  let l:config_path = s:resolve_existing_local_config_path(a:start_directory)
   let l:config = s:read_json_object(l:config_path)
   return trim(s:to_string_or_empty(get(l:config, s:cmake_config_build_config_key, '')))
 endfunction
@@ -985,14 +1002,16 @@ function! s:is_selection_popup_close_key(key) abort
 endfunction
 
 function! s:is_selection_popup_confirm_key(key) abort
-  return a:key ==# 'b' || a:key ==# "\<CR>" || a:key ==# "\<Enter>"
+  return a:key ==# "\<CR>" || a:key ==# "\<Enter>"
 endfunction
 
-function! s:selection_popup_filter_key(key) abort
-  if a:key ==# 'j'
+function! s:selection_popup_filter_key(key, ...) abort
+  let l:search_mode = a:0 > 0 ? s:as_condition_bool(a:1) : 0
+
+  if !l:search_mode && a:key ==# 'j'
     return "\<Down>"
   endif
-  if a:key ==# 'k'
+  if !l:search_mode && a:key ==# 'k'
     return "\<Up>"
   endif
   if s:is_selection_popup_confirm_key(a:key)
@@ -1007,7 +1026,7 @@ function! s:on_selection_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  return popup_filter_menu(a:popup_id, s:selection_popup_filter_key(a:key))
+  return popup_filter_menu(a:popup_id, s:selection_popup_filter_key(a:key, 0))
 endfunction
 
 function! s:switch_preset_popup_options(prompt, display_items, query, search_mode) abort
@@ -1087,7 +1106,9 @@ function! s:on_switch_preset_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  let l:mapped_selection_key = s:selection_popup_filter_key(
+        \ a:key,
+        \ get(l:state, 'search_mode', 0))
   if l:mapped_selection_key !=# a:key
     return popup_filter_menu(a:popup_id, l:mapped_selection_key)
   endif
@@ -1242,7 +1263,9 @@ function! s:on_switch_build_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  let l:mapped_selection_key = s:selection_popup_filter_key(
+        \ a:key,
+        \ get(l:state, 'search_mode', 0))
   if l:mapped_selection_key !=# a:key
     return popup_filter_menu(a:popup_id, l:mapped_selection_key)
   endif
@@ -1340,7 +1363,7 @@ function! s:run_switch_target() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:config_path = s:resolve_existing_local_config_path(l:working_directory)
   let l:config = s:read_json_object(l:config_path)
-  let l:selection_prompt = 'Select CMake target'
+  let l:selection_prompt = 'Select target'
   let l:project_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
@@ -1372,7 +1395,10 @@ function! s:run_switch_target() abort
     return
   endif
 
-  let l:selected_target = s:select_item_from_list(l:selection_prompt, l:targets)
+  let l:selected_target = s:select_item_from_list(
+        \ l:selection_prompt,
+        \ l:targets,
+        \ {s:cmake_switch_target_all_name: '(' . s:cmake_switch_target_all_name . ')'})
   if empty(l:selected_target)
     call s:write_info('Target selection canceled.')
     return
@@ -1430,12 +1456,8 @@ endfunction
 function! s:switch_target_popup_title(prompt, query, ...) abort
   let l:query = s:to_string_or_empty(a:query)
   let l:search_mode = a:0 > 0 ? s:as_condition_bool(a:1) : !empty(l:query)
-  if !l:search_mode
-    return a:prompt
-  endif
-
   if empty(l:query)
-    return a:prompt . ' (Insert)'
+    return l:search_mode ? a:prompt . ' (Insert)' : a:prompt
   endif
 
   return a:prompt . ' [' . l:query . '] (Insert)'
@@ -1497,7 +1519,9 @@ function! s:on_switch_target_popup_filter(popup_id, key) abort
     return 1
   endif
 
-  let l:mapped_selection_key = s:selection_popup_filter_key(a:key)
+  let l:mapped_selection_key = s:selection_popup_filter_key(
+        \ a:key,
+        \ get(l:state, 'search_mode', 0))
   if l:mapped_selection_key !=# a:key
     return popup_filter_menu(a:popup_id, l:mapped_selection_key)
   endif
@@ -2198,12 +2222,14 @@ function! s:as_condition_bool(value) abort
   return 0
 endfunction
 
-function! s:select_item_from_list(prompt, items) abort
+function! s:select_item_from_list(prompt, items, ...) abort
   if empty(a:items)
     return ''
   endif
 
-  let l:selected_index = s:inputlist_selection(a:prompt, a:items)
+  let l:display_names = a:0 > 0 && type(a:1) == v:t_dict ? a:1 : {}
+  let l:display_items = map(copy(a:items), 'get(l:display_names, v:val, v:val)')
+  let l:selected_index = s:inputlist_selection(a:prompt, l:display_items)
   let l:index = type(l:selected_index) == v:t_number
         \ ? l:selected_index
         \ : str2nr(s:to_string_or_empty(l:selected_index))
@@ -2214,12 +2240,14 @@ function! s:select_item_from_list(prompt, items) abort
   return a:items[l:index - 1]
 endfunction
 
-function! s:select_item_from_menu(prompt, items) abort
+function! s:select_item_from_menu(prompt, items, ...) abort
   if empty(a:items)
     return ''
   endif
 
-  let l:selected_index = s:menu_selection(a:prompt, a:items)
+  let l:display_names = a:0 > 0 && type(a:1) == v:t_dict ? a:1 : {}
+  let l:display_items = map(copy(a:items), 'get(l:display_names, v:val, v:val)')
+  let l:selected_index = s:menu_selection(a:prompt, l:display_items)
   let l:index = type(l:selected_index) == v:t_number
         \ ? l:selected_index
         \ : str2nr(s:to_string_or_empty(l:selected_index))
@@ -2231,6 +2259,11 @@ function! s:select_item_from_menu(prompt, items) abort
 endfunction
 
 function! s:menu_selection(prompt, items) abort
+  if exists('g:vim_cmake_naive_test_menu_response')
+        \ || exists('g:vim_cmake_naive_test_inputlist_response')
+    let g:vim_cmake_naive_test_last_menu_items = copy(a:items)
+  endif
+
   if exists('g:vim_cmake_naive_test_menu_response')
     return g:vim_cmake_naive_test_menu_response
   endif
@@ -2248,16 +2281,17 @@ function! s:menu_selection(prompt, items) abort
 endfunction
 
 function! s:inputlist_selection(prompt, items) abort
-  if exists('g:vim_cmake_naive_test_inputlist_response')
-    return g:vim_cmake_naive_test_inputlist_response
-  endif
-
   let l:lines = [a:prompt]
   let l:index = 0
   while l:index < len(a:items)
     call add(l:lines, (l:index + 1) . '. ' . a:items[l:index])
     let l:index += 1
   endwhile
+
+  if exists('g:vim_cmake_naive_test_inputlist_response')
+    let g:vim_cmake_naive_test_last_inputlist_lines = copy(l:lines)
+    return g:vim_cmake_naive_test_inputlist_response
+  endif
 
   return inputlist(l:lines)
 endfunction
@@ -2327,10 +2361,12 @@ function! s:run_generate() abort
         \ }
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
+        \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
         \ 'terminal_name': l:generate_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'command_name': 'CMakeGenerate',
         \ 'on_success_callback': function('s:on_generate_command_success', [copy(l:generate_completion_context)])
         \ })
   call s:write_info('Started generate in ' . s:relative_path(l:generation_directory, l:project_root))
@@ -2434,10 +2470,12 @@ function! s:run_build() abort
   let l:build_terminal_name = s:cmake_build_terminal_running_name(l:preset_value, l:target_value)
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
+        \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
         \ 'terminal_name': l:build_terminal_name,
         \ 'success_terminal_name': 'Success',
-        \ 'failure_terminal_name_prefix': 'Failure'
+        \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'command_name': 'CMakeBuild'
         \ })
   call s:write_info('Started build in ' . s:relative_path(l:build_target_directory, l:project_root))
 endfunction
@@ -2500,10 +2538,12 @@ function! s:run_test() abort
   let l:test_terminal_name = s:cmake_test_terminal_running_name(l:preset_value)
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
+        \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
         \ 'terminal_name': l:test_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'command_name': 'CMakeTest',
         \ 'working_directory': l:test_directory
         \ })
   call s:write_info('Started tests in ' . s:relative_path(l:test_directory, l:project_root))
@@ -2539,10 +2579,12 @@ function! s:run_run() abort
   let l:run_terminal_name = s:cmake_run_terminal_running_name(l:preset_value, l:target_value)
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
+        \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
         \ 'terminal_name': l:run_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'command_name': 'CMakeRun',
         \ 'working_directory': l:run_directory
         \ })
   call s:write_info('Started run in ' . s:relative_path(l:run_directory, l:project_root))
@@ -2894,6 +2936,11 @@ function! s:build_terminal_max_allowed_height(main_window_height) abort
   return max([1, min([s:build_terminal_max_height, l:main_window_height / 2])])
 endfunction
 
+function! s:terminal_reuse_group(value) abort
+  let l:group_name = trim(s:to_string_or_empty(a:value))
+  return empty(l:group_name) ? 'shared' : l:group_name
+endfunction
+
 function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   if empty(a:argv)
     throw 'Command arguments cannot be empty.'
@@ -2909,6 +2956,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endif
 
   let l:reuse_previous_build_window = s:as_condition_bool(get(l:options, 'reuse_previous_build_window', 0))
+  let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
   let l:split_orientation = tolower(trim(s:to_string_or_empty(get(l:options, 'split_orientation', 'vertical'))))
   if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
     throw 'Split orientation must be "vertical" or "horizontal".'
@@ -2936,6 +2984,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ 'success_terminal_name': l:success_terminal_name,
         \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix,
         \ 'on_success_callback': l:OnSuccessCallback,
+        \ 'reuse_group': l:reuse_group,
         \ 'working_directory': l:working_directory,
         \ 'max_height': l:terminal_max_height
         \ }
@@ -2943,11 +2992,13 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ ? s:open_previous_build_terminal_window_or_recreate(
         \   l:split_orientation,
         \   l:terminal_max_height,
-        \   l:origin_is_terminal_window)
+        \   l:origin_is_terminal_window,
+        \   l:reuse_group)
         \ : s:open_new_build_terminal_window(
         \   l:split_orientation,
         \   l:terminal_max_height,
-        \   l:origin_is_terminal_window)
+        \   l:origin_is_terminal_window,
+        \   l:reuse_group)
 
   try
     try
@@ -2962,13 +3013,14 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
             \ l:terminal.window_id,
             \ l:split_orientation,
             \ l:terminal_max_height,
-            \ l:origin_is_terminal_window)
+            \ l:origin_is_terminal_window,
+            \ l:reuse_group)
       call s:start_terminal_command_in_current_buffer(a:argv, l:terminal.window_id, l:terminal_command_options)
     endtry
 
     let l:terminal.buffer_number = bufnr('%')
     if l:reuse_previous_build_window
-      call s:remember_previous_build_terminal_window(l:terminal)
+      call s:remember_previous_build_terminal_window(l:terminal, l:reuse_group)
     endif
   finally
     if win_id2win(l:origin_window_id) > 0
@@ -2977,15 +3029,15 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   endtry
 endfunction
 
-function! s:open_previous_build_terminal_window_or_recreate(split_orientation, max_height, skip_resize) abort
+function! s:open_previous_build_terminal_window_or_recreate(split_orientation, max_height, skip_resize, reuse_group) abort
   let l:split_orientation = tolower(trim(s:to_string_or_empty(a:split_orientation)))
   if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
     throw 'Split orientation must be "vertical" or "horizontal".'
   endif
 
-  let l:previous_terminal = s:previous_build_terminal_window()
+  let l:previous_terminal = s:previous_build_terminal_window(a:reuse_group)
   if empty(l:previous_terminal)
-    return s:open_new_build_terminal_window(l:split_orientation, a:max_height, a:skip_resize)
+    return s:open_new_build_terminal_window(l:split_orientation, a:max_height, a:skip_resize, a:reuse_group)
   endif
 
   if get(l:previous_terminal, 'split_orientation', 'vertical') !=# l:split_orientation
@@ -2993,7 +3045,8 @@ function! s:open_previous_build_terminal_window_or_recreate(split_orientation, m
           \ l:previous_terminal.window_id,
           \ l:split_orientation,
           \ a:max_height,
-          \ a:skip_resize)
+          \ a:skip_resize,
+          \ a:reuse_group)
   endif
 
   if s:is_previous_build_terminal_window_reusable(l:previous_terminal)
@@ -3010,10 +3063,11 @@ function! s:open_previous_build_terminal_window_or_recreate(split_orientation, m
         \ l:previous_terminal.window_id,
         \ l:split_orientation,
         \ a:max_height,
-        \ a:skip_resize)
+        \ a:skip_resize,
+        \ a:reuse_group)
 endfunction
 
-function! s:open_new_build_terminal_window(split_orientation, max_height, skip_resize) abort
+function! s:open_new_build_terminal_window(split_orientation, max_height, skip_resize, reuse_group) abort
   let l:max_height = type(a:max_height) == v:t_number
         \ ? a:max_height
         \ : str2nr(s:to_string_or_empty(a:max_height))
@@ -3022,10 +3076,51 @@ function! s:open_new_build_terminal_window(split_orientation, max_height, skip_r
   endif
 
   if a:split_orientation ==# 'horizontal'
-    if a:skip_resize
-      execute 'silent keepalt botright new'
-    else
-      execute 'silent keepalt botright ' . l:max_height . 'new'
+    let l:existing_preview_window_id = -1
+    let l:existing_preview_buffer_number = -1
+    let l:existing_preview_group = ''
+    if exists('*getwininfo')
+      for l:window_info in getwininfo()
+        let l:window_id = get(l:window_info, 'winid', 0)
+        let l:buffer_number = get(l:window_info, 'bufnr', -1)
+        if l:window_id <= 0 || l:buffer_number <= 0 || !getwinvar(l:window_id, '&previewwindow', 0)
+          continue
+        endif
+
+        let l:existing_preview_window_id = l:window_id
+        let l:existing_preview_buffer_number = l:buffer_number
+        let l:existing_preview_group = trim(
+              \ s:to_string_or_empty(getbufvar(l:buffer_number, 'vim_cmake_naive_terminal_reuse_group', '')))
+        break
+      endfor
+    endif
+    if l:existing_preview_window_id > 0
+          \ && l:existing_preview_buffer_number > 0
+          \ && getbufvar(l:existing_preview_buffer_number, 'vim_cmake_naive_build_terminal', 0)
+          \ && !empty(l:existing_preview_group)
+          \ && l:existing_preview_group !=# a:reuse_group
+      if win_gotoid(l:existing_preview_window_id)
+        execute 'silent! close!'
+      endif
+      if bufexists(l:existing_preview_buffer_number)
+            \ && getbufvar(l:existing_preview_buffer_number, 'vim_cmake_naive_build_terminal', 0)
+        execute 'silent! bwipeout! ' . l:existing_preview_buffer_number
+      endif
+    endif
+
+    execute 'silent keepalt pedit ' . fnameescape(s:build_terminal_buffer_name)
+    silent! wincmd P
+    if !&l:previewwindow
+      if a:skip_resize
+        execute 'silent keepalt botright new'
+      else
+        execute 'silent keepalt botright ' . l:max_height . 'new'
+      endif
+      silent! setlocal previewwindow
+    endif
+
+    if !a:skip_resize
+      execute 'silent resize ' . max([1, l:max_height])
     endif
   else
     execute 'silent keepalt vertical botright new'
@@ -3033,6 +3128,7 @@ function! s:open_new_build_terminal_window(split_orientation, max_height, skip_r
   call s:disable_swapfile_for_current_buffer()
   execute 'silent file ' . fnameescape(s:build_terminal_buffer_name)
   let b:vim_cmake_naive_build_terminal = 1
+  let b:vim_cmake_naive_terminal_reuse_group = a:reuse_group
   return {
         \ 'window_id': win_getid(),
         \ 'buffer_number': bufnr('%'),
@@ -3041,50 +3137,48 @@ function! s:open_new_build_terminal_window(split_orientation, max_height, skip_r
         \ }
 endfunction
 
-function! s:replace_build_terminal_window(window_id, split_orientation, max_height, skip_resize) abort
+function! s:replace_build_terminal_window(window_id, split_orientation, max_height, skip_resize, reuse_group) abort
   if win_id2win(a:window_id) <= 0
-    return s:open_new_build_terminal_window(a:split_orientation, a:max_height, a:skip_resize)
+    return s:open_new_build_terminal_window(a:split_orientation, a:max_height, a:skip_resize, a:reuse_group)
   endif
 
   call win_gotoid(a:window_id)
-  let l:old_window_id = a:window_id
   let l:old_buffer_number = bufnr('%')
-  let l:new_terminal = s:open_new_build_terminal_window(
-        \ a:split_orientation,
-        \ a:max_height,
-        \ a:skip_resize)
-  if win_id2win(l:old_window_id) > 0
-    call win_gotoid(l:old_window_id)
-    execute 'silent! close!'
-    if win_id2win(l:old_window_id) > 0
-          \ && l:old_buffer_number > 0
-          \ && bufexists(l:old_buffer_number)
-      execute 'silent! bwipeout! ' . l:old_buffer_number
-    endif
-    if win_id2win(l:new_terminal.window_id) > 0
-      call win_gotoid(l:new_terminal.window_id)
-    endif
+  execute 'silent! close!'
+  if l:old_buffer_number > 0
+        \ && bufexists(l:old_buffer_number)
+        \ && getbufvar(l:old_buffer_number, 'vim_cmake_naive_build_terminal', 0)
+    execute 'silent! bwipeout! ' . l:old_buffer_number
   endif
 
-  return l:new_terminal
+  return s:open_new_build_terminal_window(
+        \ a:split_orientation,
+        \ a:max_height,
+        \ a:skip_resize,
+        \ a:reuse_group)
 endfunction
 
-function! s:remember_previous_build_terminal_window(terminal) abort
+function! s:remember_previous_build_terminal_window(terminal, reuse_group) abort
+  let l:reuse_group = s:terminal_reuse_group(a:reuse_group)
   let l:split_orientation = tolower(trim(s:to_string_or_empty(get(a:terminal, 'split_orientation', 'vertical'))))
   if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
     let l:split_orientation = 'vertical'
   endif
-  let s:last_cmake_build_window_id = get(a:terminal, 'window_id', -1)
-  let s:last_cmake_build_buffer_number = get(a:terminal, 'buffer_number', -1)
-  let s:last_cmake_build_split_orientation = l:split_orientation
+  let s:last_cmake_terminal_windows_by_group[l:reuse_group] = {
+        \ 'window_id': get(a:terminal, 'window_id', -1),
+        \ 'split_orientation': l:split_orientation
+        \ }
 endfunction
 
-function! s:previous_build_terminal_window() abort
-  if type(s:last_cmake_build_window_id) != v:t_number || s:last_cmake_build_window_id <= 0
+function! s:previous_build_terminal_window(reuse_group) abort
+  let l:reuse_group = s:terminal_reuse_group(a:reuse_group)
+  let l:window_state = get(s:last_cmake_terminal_windows_by_group, l:reuse_group, {})
+  let l:window_id = get(l:window_state, 'window_id', -1)
+  if type(l:window_id) != v:t_number || l:window_id <= 0
     return {}
   endif
 
-  let l:window_number = win_id2win(s:last_cmake_build_window_id)
+  let l:window_number = win_id2win(l:window_id)
   if l:window_number <= 0
     return {}
   endif
@@ -3098,13 +3192,13 @@ function! s:previous_build_terminal_window() abort
     return {}
   endif
 
-  let l:split_orientation = tolower(trim(s:to_string_or_empty(s:last_cmake_build_split_orientation)))
+  let l:split_orientation = tolower(trim(s:to_string_or_empty(get(l:window_state, 'split_orientation', 'vertical'))))
   if l:split_orientation !=# 'vertical' && l:split_orientation !=# 'horizontal'
     let l:split_orientation = 'vertical'
   endif
 
   return {
-        \ 'window_id': s:last_cmake_build_window_id,
+        \ 'window_id': l:window_id,
         \ 'buffer_number': l:buffer_number,
         \ 'split_orientation': l:split_orientation
         \ }
@@ -3196,9 +3290,7 @@ function! s:build_terminal_window_ids() abort
 endfunction
 
 function! s:reset_previous_build_terminal_window() abort
-  let s:last_cmake_build_window_id = -1
-  let s:last_cmake_build_buffer_number = -1
-  let s:last_cmake_build_split_orientation = 'vertical'
+  let s:last_cmake_terminal_windows_by_group = {}
 endfunction
 
 function! s:is_terminal_buffer_job_running(buffer_number) abort
@@ -3249,6 +3341,8 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
+  let l:command_name = trim(s:to_string_or_empty(get(l:options, 'command_name', '')))
+  let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   let l:max_height = get(l:options, 'max_height', 0)
@@ -3265,7 +3359,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix])
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:command_name])
   endif
 
   let l:term_start_options = copy(l:term_options)
@@ -3296,6 +3390,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   call s:disable_swapfile_for_current_buffer()
   let l:terminal_buffer_number = bufnr('%')
   let b:vim_cmake_naive_build_terminal = 1
+  let b:vim_cmake_naive_terminal_reuse_group = l:reuse_group
   if l:max_height > 0
     let b:vim_cmake_naive_build_terminal_max_height = l:max_height
   else
@@ -3303,6 +3398,9 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
   call s:set_running_terminal_name(a:window_id, l:terminal_name, l:terminal_buffer_number)
   call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+  if !s:should_capture_build_terminal_for_tests()
+    call s:hold_running_cmake_command_lock(l:command_name)
+  endif
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
     call s:set_terminal_name_for_window(
@@ -3341,26 +3439,30 @@ function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) a
   call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, job, status) abort
-  let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
-  call s:set_terminal_name_for_window(
-        \ a:window_id,
-        \ s:terminal_completion_name(
-        \   l:exit_code,
-        \   a:success_terminal_name,
-        \   a:failure_terminal_name_prefix))
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, command_name, job, status) abort
+  try
+    let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
+    call s:set_terminal_name_for_window(
+          \ a:window_id,
+          \ s:terminal_completion_name(
+          \   l:exit_code,
+          \   a:success_terminal_name,
+          \   a:failure_terminal_name_prefix))
 
-  let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
-  if l:terminal_buffer_number > 0
-    call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
-  endif
+    let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
+    if l:terminal_buffer_number > 0
+      call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
+    endif
 
-  let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
-  if l:exit_code == 0
-    call s:invoke_terminal_success_callback(l:OnSuccessCallback)
-  else
-    call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
-  endif
+    let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
+    if l:exit_code == 0
+      call s:invoke_terminal_success_callback(l:OnSuccessCallback)
+    else
+      call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
+    endif
+  finally
+    call s:release_running_cmake_command_lock(a:command_name)
+  endtry
 endfunction
 
 function! s:set_build_terminal_success_callback(window_id, Callback) abort
@@ -3520,6 +3622,7 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
   let l:window_number = win_id2win(a:window_id)
   let l:window_width = l:window_number > 0 ? winwidth(l:window_number) : 0
   let l:window_height = l:window_number > 0 ? winheight(l:window_number) : 0
+  let l:is_preview_window = l:window_number > 0 ? getwinvar(l:window_number, '&previewwindow', 0) : 0
   let l:current_window_number = winnr()
   let l:is_vertical_split = winnr('h') != l:current_window_number
         \ || winnr('l') != l:current_window_number
@@ -3536,6 +3639,7 @@ function! s:capture_build_terminal_for_tests(window_id, buffer_number) abort
         \ 'winid': a:window_id,
         \ 'width': l:window_width,
         \ 'height': l:window_height,
+        \ 'is_preview_window': l:is_preview_window,
         \ 'max_height': l:max_height,
         \ 'window_count': winnr('$'),
         \ 'is_vertical_split': l:is_vertical_split,
@@ -3618,8 +3722,7 @@ function! s:integration_target_value(config) abort
     throw 'Config payload must be a JSON object.'
   endif
 
-  let l:target_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_target_key, '')))
-  return empty(l:target_value) ? s:cmake_switch_target_all_name : l:target_value
+  return trim(s:to_string_or_empty(get(a:config, s:cmake_config_target_key, '')))
 endfunction
 
 function! s:integration_build_directory_relative_path(config_path, config) abort

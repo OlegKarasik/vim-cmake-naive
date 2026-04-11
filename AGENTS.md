@@ -1,3 +1,9 @@
+# Rules
+
+1. DO NOT create or edit files outside of repository.
+2. DO NOT redirect output from commands into files outside of repository.
+3. DO NOT take dependencies on other plugins.
+
 # Concepts
 
 ## Root Directory
@@ -64,6 +70,9 @@ window:
 1. `CMakeBuild`
 2. `CMakeTest`
 3. `CMakeRun`
+4. `CMakeGenerate`
+
+Terminal output is shown in the Vim preview window.
 
 # Commands
 
@@ -204,8 +213,8 @@ window:
 1. Requires non-empty `target` in config; otherwise reports: `No target selected.
    Please use CMakeSwitchTarget command first.`
 2. Resolves [Root Directory](#root-directory).
-3. Resolves [Local Configuration](#local-configuration), creating default config if
-   missing.
+3. Resolves [Local Configuration](#local-configuration), creating default config
+   if missing.
 4. Resolves run directory from `output` and optional `preset`.
 5. Resolves executable path for target:
    1. checks direct candidate names (`<target>`, and on Windows also
@@ -265,51 +274,20 @@ window:
    12. `CMakeMenu`
    13. `CMakeMenuFull`
    14. `CMakeConfigSetOutput`
+2. Uses [Command Menu Popup](#command-menu-popup) when popup support exists;
+   otherwise list/menu fallback.
 2. Only commands that currently exist in Vim are shown.
 3. For commands requiring args (`CMakeConfigSetOutput`), prompts: `Arguments for
    <Command>: `.
 4. Empty args cancel execution for that command.
 5. Runs selected command with `silent`.
 
-
 # Popups
-
-## Shared Selection Popup Behavior Used by preset/build/target/menu popups.
-
-1. Visual style:
-   1. fixed width: `30`
-   2. dynamic height: `1..10` lines (with scrollbar)
-   3. highlight: `Pmenu`
-   4. border highlight: `Pmenu`
-   5. single-line rounded border style
-2. Item rendering:
-   1. all rows are numbered (`1.`, `2.`, ...)
-   2. preset/build/target popups show `*` marker on current item
-   3. menu popups intentionally do not show `*`
-3. Navigation keys:
-   1. `j` or `Down` - move down
-   2. `k` or `Up` - move up
-   3. `b`, `Enter`, or `CR` - confirm selection
-   4. `x` or `Esc` - close/cancel
-4. Search mode:
-   1. `Ctrl+I` toggles search mode on/off
-   2. while search mode is on, title ends with `(Insert)`
-   3. with query text, title becomes `<Prompt> [<query>] (Insert)`
-   4. search is case-insensitive substring matching
-   5. query updates after each typed character
-   6. `Backspace`, `Ctrl+H`, `Del`, and `kDel` remove one character
-   7. `Ctrl+U` clears query
-   8. leaving search mode keeps current query/filter
-5. Important key precedence detail:
-   1. `x`, `Esc`, `j`, `k`, `b`, and Enter remain command keys even when search
-      mode is active
-   2. only other printable characters are inserted into search query
-6. Empty filter result is rendered as one row: `1.   no matches`.
 
 ## Information Popup Created by `:CMakeInfo` via `popup_create`.
 
 1. Visual style:
-   1. width is dynamic and clamped to `10..30`
+   1. width is dynamic and clamped to `10..100`
    2. width is computed from max(title length, content width)
    3. height is dynamic and clamped to `1..10`
    4. highlight: `Pmenu`
@@ -323,36 +301,142 @@ window:
 
 ## Preset Selection Popup Created by `:CMakeSwitchPreset`.
 
-1. Title starts as `Select CMake preset`.
-2. `(none)` is displayed as the first option.
-3. Current preset is marked with `*`.
-4. On confirm, applies preset selection logic (set/remove keys as described in
-   [CMakeSwitchPreset](#cmakeswitchpreset)).
+1. Visual style:
+   1. fixed width: `30`
+   2. dynamic height: `1..10` lines (with scrollbar)
+   3. highlight: `Pmenu`
+   4. border highlight: `Pmenu`
+   5. single-line rounded border style
+2. Title and item rendering:
+   1. title starts as `Select preset`
+   2. `(none)` is displayed as the first option
+   3. all rows are numbered (`1.`, `2.`, ...)
+   4. current preset is marked with `*`
+3. Navigation keys:
+   1. `j` or `Down` - move down
+   2. `k` or `Up` - move up
+   3. `Enter`, or `CR` - confirm selection
+   4. `x` or `Esc` - close/cancel
+4. Search mode:
+   1. `Ctrl+I` toggles search mode on/off
+   2. while search mode is on, title ends with `(Insert)`
+   3. with query text, title becomes `<Prompt> [<query>] (Insert)`
+   4. search is case-insensitive substring matching
+   5. query updates after each typed character
+   6. `Backspace`, `Ctrl+H`, `Del`, and `kDel` remove one character
+   7. `Ctrl+U` clears query
+   8. leaving search mode keeps current query/filter active and title in `<Prompt
+      [<query>] (Insert)` format
+5. Key precedence:
+   1. `Esc` and `Enter` remain command keys even when search mode is active
+   2. any other printable characters are inserted into search query while search
+      mode is active
+6. Empty filter result is rendered as one row: `1.   no matches`.
+7. On confirm, invokes [CMakeSwitchPreset](#cmakeswitchpreset)).
 
 ## Build Selection Popup Created by `:CMakeSwitchBuild`.
 
-1. Title starts as `Select CMake build`.
-2. `(none)` plus default build types are displayed.
-3. Current build is marked with `*`.
-4. On confirm, applies build selection logic (set/remove keys as described in
-   [CMakeSwitchBuild](#cmakeswitchbuild)).
+1. Visual style:
+   1. fixed width: `30`
+   2. dynamic height: `1..10` lines (with scrollbar)
+   3. highlight: `Pmenu`
+   4. border highlight: `Pmenu`
+   5. single-line rounded border style
+2. Title and item rendering:
+   1. title starts as `Select build`
+   2. `(none)` plus default build types are displayed
+   3. all rows are numbered (`1.`, `2.`, ...)
+   4. current build is marked with `*`
+3. Navigation keys:
+   1. `j` or `Down` - move down
+   2. `k` or `Up` - move up
+   3. `Enter`, or `CR` - confirm selection
+   4. `x` or `Esc` - close/cancel
+4. Search mode:
+   1. `Ctrl+I` toggles search mode on/off
+   2. while search mode is on, title ends with `(Insert)`
+   3. with query text, title becomes `<Prompt> [<query>] (Insert)`
+   4. search is case-insensitive substring matching
+   5. query updates after each typed character
+   6. `Backspace`, `Ctrl+H`, `Del`, and `kDel` remove one character
+   7. `Ctrl+U` clears query
+   8. leaving search mode keeps current query/filter active and title in `<Prompt
+      [<query>] (Insert)` format
+5. Key precedence:
+   1. `Esc` and `Enter` remain command keys even when search mode is active
+   2. any other printable characters are inserted into search query while search
+      mode is active
+6. Empty filter result is rendered as one row: `1.   no matches`.
+7. On confirm, invokes [CMakeSwitchBuild](#cmakeswitchbuild)).
 
 ## Target Selection Popup Created by `:CMakeSwitchTarget`.
 
-1. Title starts as `Select CMake target`.
-2. `(all)` is displayed as the first option.
-3. Current target is marked with `*` (or `(all)` when target key is missing).
-4. On confirm, applies target selection logic (copy compile commands and
-   set/remove `target` as described in [CMakeSwitchTarget](#cmakeswitchtarget)).
+1. Visual style:
+   1. fixed width: `30`
+   2. dynamic height: `1..10` lines (with scrollbar)
+   3. highlight: `Pmenu`
+   4. border highlight: `Pmenu`
+   5. single-line rounded border style
+2. Title and item rendering:
+   1. title starts as `Select target`
+   2. `(all)` is displayed as the first option
+   3. all rows are numbered (`1.`, `2.`, ...)
+   4. current target is marked with `*` (or `(all)` when target key is missing)
+3. Navigation keys:
+   1. `j` or `Down` - move down
+   2. `k` or `Up` - move up
+   3. `Enter`, or `CR` - confirm selection
+   4. `x` or `Esc` - close/cancel
+4. Search mode:
+   1. `Ctrl+I` toggles search mode on/off
+   2. while search mode is on, title ends with `(Insert)`
+   3. with query text, title becomes `<Prompt> [<query>] (Insert)`
+   4. search is case-insensitive substring matching
+   5. query updates after each typed character
+   6. `Backspace`, `Ctrl+H`, `Del`, and `kDel` remove one character
+   7. `Ctrl+U` clears query
+   8. leaving search mode keeps current query/filter active and title in `<Prompt
+      [<query>] (Insert)` format
+5. Key precedence:
+   1. `Esc` and `Enter` remain command keys even when search mode is active
+   2. any other printable characters are inserted into search query while search
+      mode is active
+6. Empty filter result is rendered as one row: `1.   no matches`.
+7. On confirm, invokes [CMakeSwitchTarget](#cmakeswitchtarget)).
 
 ## Command Menu Popup Created by `:CMakeMenu` and `:CMakeMenuFull`.
 
-1. Title starts as `Select CMake command`.
-2. Rows are numbered command names with no current-item marker.
-3. `:CMakeMenu` shows compact command set.
-4. `:CMakeMenuFull` shows full command set.
-5. On confirm, executes selected command immediately (`silent` execution).
-
+1. Visual style:
+   1. fixed width: `30`
+   2. dynamic height: `1..10` lines (with scrollbar)
+   3. highlight: `Pmenu`
+   4. border highlight: `Pmenu`
+   5. single-line rounded border style
+2. Title and item rendering:
+   1. title starts as `Select command`
+   2. all rows are numbered (`1.`, `2.`, ...)
+   3. rows are command names with no current-item marker
+3. Navigation keys:
+   1. `j` or `Down` - move down
+   2. `k` or `Up` - move up
+   3. `Enter`, or `CR` - confirm selection
+   4. `x` or `Esc` - close/cancel
+4. Search mode:
+   1. `Ctrl+I` toggles search mode on/off
+   2. while search mode is on, title ends with `(Insert)`
+   3. with query text, title becomes `<Prompt> [<query>] (Insert)`
+   4. search is case-insensitive substring matching
+   5. query updates after each typed character
+   6. `Backspace`, `Ctrl+H`, `Del`, and `kDel` remove one character
+   7. `Ctrl+U` clears query
+   8. leaving search mode keeps current query/filter active and title in `<Prompt
+      [<query>] (Insert)` format
+5. Key precedence:
+   1. `Esc` and `Enter` remain command keys even when search mode is active
+   2. any other printable characters are inserted into search query while search
+      mode is active
+6. Empty filter result is rendered as one row: `1.   no matches`.
+7. On confirm, executes selected command immediately (`silent` execution).
 
 # Plug Mappings
 
