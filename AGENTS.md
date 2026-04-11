@@ -49,6 +49,15 @@ These files are maintained in the [Root Directory](#root-directory):
 
 They are updated whenever local configuration is written.
 
+## Startup
+
+During startup, the plugin:
+
+1. Reads `target` and the resolved [Build Directory](#build-directory) from
+   [Local Configuration](#local-configuration).
+2. Saves those values into the [Integration State Files](#integration-state-files)
+   (`.vim-cmake-naive-target` and `.vim-cmake-naive-output`).
+
 ## Active and Target Compile Commands
 
 1. Active file: `<output>/compile_commands.json` (used as the main compile

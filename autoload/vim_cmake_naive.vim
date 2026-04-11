@@ -249,7 +249,7 @@ function! vim_cmake_naive#menu() abort
     let l:selected_command = s:run_cmake_command(
           \ 'CMakeMenu',
           \ function('s:run_menu_with_specs'),
-          \ [s:cmake_menu_compact_command_specs])
+          \ [s:cmake_menu_compact_command_specs, 'CMakeMenu'])
     if !empty(l:selected_command)
       call s:execute_menu_command(l:selected_command)
     endif
@@ -263,12 +263,25 @@ function! vim_cmake_naive#menu_full() abort
     let l:selected_command = s:run_cmake_command(
           \ 'CMakeMenuFull',
           \ function('s:run_menu_with_specs'),
-          \ [s:cmake_menu_full_command_specs])
+          \ [s:cmake_menu_full_command_specs, 'CMakeMenuFull'])
     if !empty(l:selected_command)
       call s:execute_menu_command(l:selected_command)
     endif
   catch
     call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#sync_startup_integration_files() abort
+  try
+    call s:run_sync_startup_integration_files()
+  catch
+    let l:message = s:format_exception(v:exception)
+    if stridx(l:message, s:cmake_missing_local_config_error) >= 0
+          \ || stridx(l:message, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0
+      return
+    endif
+    call s:write_error(l:message)
   endtry
 endfunction
 
@@ -602,6 +615,14 @@ function! s:run_switch(options) abort
   call s:copy_compile_commands_file(l:source_file_path, l:output_directory)
 endfunction
 
+function! s:run_sync_startup_integration_files() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:config_path = s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+  call s:update_local_integration_files(l:config_path, l:config)
+endfunction
+
 function! s:run_cmake_config() abort
   let l:project_root = s:resolve_cmake_project_root(getcwd())
   let l:config_path = s:cmake_config_path(l:project_root)
@@ -711,14 +732,15 @@ function! s:run_switch_build() abort
   call s:apply_switch_build_selection(l:selected_build)
 endfunction
 
-function! s:run_menu_with_specs(command_specs) abort
+function! s:run_menu_with_specs(command_specs, ...) abort
   let l:commands = s:menu_commands(a:command_specs)
   if empty(l:commands)
     throw 'No selectable CMake commands found.'
   endif
 
+  let l:popup_lock_command_name = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
   if s:should_use_popup_menu_for_preset_selection()
-    return s:show_menu_popup(s:cmake_menu_prompt, l:commands)
+    return s:show_menu_popup(s:cmake_menu_prompt, l:commands, l:popup_lock_command_name)
   endif
 
   let l:selected_command = s:select_item_from_list(s:cmake_menu_prompt, l:commands)
@@ -742,21 +764,25 @@ function! s:menu_commands(command_specs) abort
   return l:commands
 endfunction
 
-function! s:show_menu_popup(prompt, commands) abort
+function! s:show_menu_popup(prompt, commands, ...) abort
+  let l:popup_lock_command_name = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
   let l:state = {
         \ 'prompt': a:prompt,
         \ 'all_items': copy(a:commands),
         \ 'filtered_items': copy(a:commands),
         \ 'query': '',
-        \ 'search_mode': 0
+        \ 'search_mode': 0,
+        \ 'lock_command_name': l:popup_lock_command_name
         \ }
   if exists('g:vim_cmake_naive_test_popup_menu_response')
     let l:test_response = g:vim_cmake_naive_test_popup_menu_response
     let l:test_result = l:test_response
+    let l:hold_lock = 0
     if type(l:test_response) == v:t_dict
       let l:state.query = s:to_string_or_empty(get(l:test_response, 'query', ''))
       let l:state.search_mode = s:as_condition_bool(get(l:test_response, 'search_mode', !empty(l:state.query)))
       let l:test_result = get(l:test_response, 'result', 0)
+      let l:hold_lock = s:as_condition_bool(get(l:test_response, 'hold_lock', 0))
     endif
     let l:state.filtered_items = s:filter_switch_target_popup_items(l:state.all_items, l:state.query)
     let l:display_items = s:menu_popup_display_items(l:state.filtered_items)
@@ -766,6 +792,12 @@ function! s:show_menu_popup(prompt, commands) abort
     let l:popup_options = s:menu_popup_options(a:prompt, l:display_items, l:state.query, l:state.search_mode)
     let g:vim_cmake_naive_test_last_menu_popup_items = copy(l:display_items)
     let g:vim_cmake_naive_test_last_menu_popup_options = copy(l:popup_options)
+    if l:hold_lock
+      if !empty(l:popup_lock_command_name)
+        call s:hold_running_cmake_command_lock(l:popup_lock_command_name)
+      endif
+      return ''
+    endif
     return s:selected_menu_command_from_popup_result(l:state.filtered_items, l:test_result)
   endif
 
@@ -774,6 +806,9 @@ function! s:show_menu_popup(prompt, commands) abort
   let l:popup_id = popup_menu(l:display_items, l:popup_options)
   if type(l:popup_id) == v:t_number && l:popup_id > 0
     let s:menu_popup_states[l:popup_id] = l:state
+    if !empty(l:popup_lock_command_name)
+      call s:hold_running_cmake_command_lock(l:popup_lock_command_name)
+    endif
   endif
   return ''
 endfunction
@@ -806,7 +841,11 @@ function! s:on_menu_popup_selection(popup_id, result) abort
   else
     let l:state = {}
   endif
+  let l:lock_command_name = trim(s:to_string_or_empty(get(l:state, 'lock_command_name', '')))
   let l:selected_command = s:selected_menu_command_from_popup_result(get(l:state, 'filtered_items', []), a:result)
+  if !empty(l:lock_command_name)
+    call s:release_running_cmake_command_lock(l:lock_command_name)
+  endif
   if empty(l:selected_command)
     return
   endif
@@ -820,6 +859,7 @@ function! s:on_menu_popup_filter(popup_id, key) abort
   endif
 
   let l:state = s:menu_popup_states[a:popup_id]
+  let l:lock_command_name = trim(s:to_string_or_empty(get(l:state, 'lock_command_name', '')))
   if s:is_switch_target_popup_search_toggle_key(a:key)
     let l:state.search_mode = !s:as_condition_bool(get(l:state, 'search_mode', 0))
     call s:refresh_menu_popup(a:popup_id)
@@ -827,6 +867,9 @@ function! s:on_menu_popup_filter(popup_id, key) abort
   endif
 
   if s:is_selection_popup_close_key(a:key, get(l:state, 'search_mode', 0))
+    if !empty(l:lock_command_name)
+      call s:release_running_cmake_command_lock(l:lock_command_name)
+    endif
     call popup_close(a:popup_id, 0)
     return 1
   endif

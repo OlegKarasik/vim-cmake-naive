@@ -519,6 +519,41 @@ function! s:test_plugin_registers_plug_mappings_for_commands() abort
   call s:assert_plugin_plug_mappings(l:expected_mappings)
 endfunction
 
+function! s:test_plugin_startup_syncs_integration_files_from_local_config() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:plugin_path = get(globpath(&runtimepath, 'plugin/vim_cmake_naive.vim', 1, 1), 0, '')
+  let l:plugin_path = fnamemodify(l:plugin_path, ':p')
+  let l:initial_loaded_plugin = get(g:, 'loaded_vim_cmake_naive', v:null)
+
+  try
+    call assert_true(!empty(l:plugin_path), 'Expected plugin/vim_cmake_naive.vim to exist in runtimepath.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:target_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-target')
+    let l:output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
+    call s:write_json(l:config_path, {'output': 'out/build', 'preset': 'dev', 'target': 'my_target'})
+    call delete(l:target_state_path)
+    call delete(l:output_state_path)
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:loaded_vim_cmake_naive
+    execute 'source ' . fnameescape(l:plugin_path)
+
+    call assert_true(filereadable(l:target_state_path), 'Expected .vim-cmake-naive-target to be created during startup.')
+    call assert_true(filereadable(l:output_state_path), 'Expected .vim-cmake-naive-output to be created during startup.')
+    call assert_equal(['my_target'], readfile(l:target_state_path, 'b'))
+    call assert_equal(['out/build/dev'], readfile(l:output_state_path, 'b'))
+  finally
+    if l:initial_loaded_plugin is v:null
+      unlet! g:loaded_vim_cmake_naive
+    else
+      let g:loaded_vim_cmake_naive = l:initial_loaded_plugin
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_config_creates_default_local_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -869,6 +904,63 @@ function! s:test_cmake_command_lock_persists_while_async_terminal_command_runs()
       unlet! g:vim_cmake_naive_test_capture_build_terminal
     else
       let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_menu_popup_holds_command_lock_until_closed() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_use_popup = get(g:, 'vim_cmake_naive_test_use_popup_menu', v:null)
+  let l:initial_popup_response = get(g:, 'vim_cmake_naive_test_popup_menu_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
+  let l:initial_inputlist_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_forced_running_command = get(g:, 'vim_cmake_naive_test_forced_running_cmake_command', v:null)
+
+  try
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_use_popup_menu = 1
+    let g:vim_cmake_naive_test_popup_menu_response = {'hold_lock': 1}
+    unlet! g:vim_cmake_naive_test_menu_response
+    unlet! g:vim_cmake_naive_test_inputlist_response
+
+    call vim_cmake_naive#menu_full()
+
+    call vim_cmake_naive#cmake_config()
+    let l:messages = execute('messages')
+    call assert_true(stridx(l:messages, 'CMake: another command CMakeMenuFull is already running') >= 0)
+    call assert_false(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
+
+    let g:vim_cmake_naive_test_forced_running_cmake_command = ''
+    call vim_cmake_naive#cmake_config()
+    call assert_true(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
+  finally
+    if l:initial_use_popup is v:null
+      unlet! g:vim_cmake_naive_test_use_popup_menu
+    else
+      let g:vim_cmake_naive_test_use_popup_menu = l:initial_use_popup
+    endif
+    if l:initial_popup_response is v:null
+      unlet! g:vim_cmake_naive_test_popup_menu_response
+    else
+      let g:vim_cmake_naive_test_popup_menu_response = l:initial_popup_response
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
+    endif
+    if l:initial_inputlist_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_inputlist_selection
+    endif
+    if l:initial_forced_running_command is v:null
+      unlet! g:vim_cmake_naive_test_forced_running_cmake_command
+    else
+      let g:vim_cmake_naive_test_forced_running_cmake_command = l:initial_forced_running_command
     endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -5334,6 +5426,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_switch_reports_missing_target_directory()
   call s:test_plugin_defines_plug_mappings_by_default()
   call s:test_plugin_registers_plug_mappings_for_commands()
+  call s:test_plugin_startup_syncs_integration_files_from_local_config()
   call s:test_cmake_config_creates_default_local_config()
   call s:test_cmake_config_preserves_existing_file()
   call s:test_cmake_set_config_preset_creates_config_with_preset()
@@ -5348,6 +5441,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_commands_report_running_command_lock()
   call s:test_cmake_command_lock_resets_after_command_failure()
   call s:test_cmake_command_lock_persists_while_async_terminal_command_runs()
+  call s:test_cmake_menu_popup_holds_command_lock_until_closed()
   call s:test_cmake_config_default_creates_default_values()
   call s:test_cmake_config_default_reapplies_defaults_and_preserves_other_keys()
   call s:test_cmake_config_uses_nearest_parent_cmakelists()
