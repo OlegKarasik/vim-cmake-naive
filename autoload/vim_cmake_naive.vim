@@ -3215,7 +3215,7 @@ function! s:open_new_build_terminal_window(split_orientation, max_height, skip_r
       endif
     endif
 
-    execute 'silent keepalt pedit ' . fnameescape(s:build_terminal_buffer_name)
+    execute 'silent keepalt botright pedit ' . fnameescape(s:build_terminal_buffer_name)
     silent! wincmd P
     if !&l:previewwindow
       if a:skip_resize

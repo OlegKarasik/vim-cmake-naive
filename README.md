@@ -95,7 +95,7 @@ This command:
   - adds `--fresh` to force clean cache regeneration
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
-- opens a horizontal split terminal and starts generate there asynchronously
+- opens a horizontal split terminal at the bottom and starts generate there asynchronously
 - when started from a non-terminal window, limits generate terminal height to at most 10 lines and never more than half of the main window height
 - when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
@@ -124,7 +124,7 @@ This command:
 - adds `--parallel <core_count>` to `cmake --build`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
-- opens a horizontal split terminal and starts the build there asynchronously
+- opens a horizontal split terminal at the bottom and starts the build there asynchronously
 - when started from a non-terminal window, limits build terminal height to at most 10 lines and never more than half of the main window height
 - when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
@@ -150,7 +150,7 @@ This command:
   - `<output>/<preset>` when preset is non-empty
 - detects available core count (minimum `1`)
 - runs `ctest --parallel <core_count>` in that working directory
-- opens a horizontal split terminal and starts tests there asynchronously
+- opens a horizontal split terminal at the bottom and starts tests there asynchronously
 - when started from a non-terminal window, limits test terminal height to at most 10 lines and never more than half of the main window height
 - when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:
@@ -176,7 +176,7 @@ This command:
   - `<output>/<preset>` when preset is non-empty
 - searches for an executable file matching the selected target under that run directory
 - runs the discovered executable in that run directory
-- opens a horizontal split terminal and starts execution there asynchronously
+- opens a horizontal split terminal at the bottom and starts execution there asynchronously
 - when started from a non-terminal window, limits run terminal height to at most 10 lines and never more than half of the main window height
 - when started from an active terminal window, keeps terminal window size unchanged
 - sets terminal status name while running to:

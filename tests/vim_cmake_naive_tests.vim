@@ -201,6 +201,25 @@ function! s:wait_for_running_terminal_window(timeout_ms) abort
   return 0
 endfunction
 
+function! s:is_window_at_bottom(window_id) abort
+  if win_id2win(a:window_id) <= 0
+    return 0
+  endif
+
+  let l:origin_window_id = win_getid()
+  let l:is_bottom_window = 0
+  if win_gotoid(a:window_id)
+    let l:current_window_number = winnr()
+    let l:is_bottom_window = winnr('j') == l:current_window_number
+          \ && winnr('k') != l:current_window_number
+  endif
+  if win_id2win(l:origin_window_id) > 0
+    call win_gotoid(l:origin_window_id)
+  endif
+
+  return l:is_bottom_window
+endfunction
+
 function! s:wait_for_plugin_terminal_buffer_name(buffer_name, timeout_ms) abort
   let l:elapsed = 0
   while l:elapsed < a:timeout_ms
@@ -1205,6 +1224,7 @@ function! s:test_cmake_generate_opens_horizontal_terminal_with_command_output() 
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
+    call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected generate preview window at the bottom.')
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
     call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
@@ -1895,6 +1915,7 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_command_output() abo
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
+    call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected build preview window at the bottom.')
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
     call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
@@ -1964,6 +1985,7 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_ou
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
+    call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected build preview window at the bottom.')
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
     call assert_equal('Success', get(l:terminal, 'buffer_name', ''))
     let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
@@ -2850,6 +2872,7 @@ function! s:test_cmake_run_opens_horizontal_terminal_with_command_output() abort
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
+    call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected run preview window at the bottom.')
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
     call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
@@ -3327,6 +3350,7 @@ function! s:test_cmake_menu_popup_lists_compact_commands_and_executes_selection(
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
     call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
     call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
+    call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected menu-triggered preview window at the bottom.')
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
