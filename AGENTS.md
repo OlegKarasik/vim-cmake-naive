@@ -488,3 +488,33 @@ The plugin registers `<Plug>(...)` mappings for all public commands:
    1. `-o <path>`
    2. `--output <path>`
    3. `--output=<path>`
+
+## `vim_cmake_naive#set_config_preset(<preset>)`
+
+1. Requires local configuration to exist.
+2. Validates that `<preset>` is non-empty.
+3. Resolves local configuration in current directory or parent directories.
+4. Sets `preset` to the exact provided string.
+5. Updates integration state files.
+
+## `vim_cmake_naive#set_config_build_config(<build>)`
+
+1. Requires local configuration to exist.
+2. Validates that `<build>` is non-empty.
+3. Resolves local configuration in current directory or parent directories.
+4. Sets `build` to the exact provided string.
+5. Updates integration state files.
+
+## `vim_cmake_naive#sync_startup_integration_files()`
+
+1. Resolves [Root Directory](#root-directory) from current working directory.
+2. Resolves nearest existing [Local Configuration](#local-configuration) under that root.
+3. Reads `target` and resolved [Build Directory](#build-directory) from config.
+4. Writes those values into `.vim-cmake-naive-target` and `.vim-cmake-naive-output`.
+5. If root/config is missing, startup-style call is treated as no-op.
+
+## `vim_cmake_naive#register_plug_mappings()`
+
+1. Registers `<Plug>(...)` mappings for all public commands.
+2. Does not override existing mappings with the same left-hand side.
+3. Registers `<Plug>(CMakeConfigSetOutput)` with a trailing space for argument entry.
