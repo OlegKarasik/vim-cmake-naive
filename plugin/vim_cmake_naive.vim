@@ -12,6 +12,7 @@ command! -nargs=0 CMakeGenerate call vim_cmake_naive#generate()
 command! -nargs=0 CMakeBuild call vim_cmake_naive#build()
 command! -nargs=0 CMakeTest call vim_cmake_naive#test()
 command! -nargs=0 CMakeRun call vim_cmake_naive#run()
+command! -nargs=* -bang CMakeMake call vim_cmake_naive#make(<q-bang>, <q-args>)
 command! -nargs=0 CMakeClose call vim_cmake_naive#close()
 command! -nargs=0 CMakeInfo call vim_cmake_naive#info()
 command! -nargs=0 CMakeMenu call vim_cmake_naive#menu()
@@ -20,3 +21,4 @@ command! -nargs=+ CMakeConfigSetOutput call vim_cmake_naive#set_config_output(<q
 
 call vim_cmake_naive#register_plug_mappings()
 call vim_cmake_naive#sync_startup_integration_files()
+call vim_cmake_naive#register_make_command_abbrev()

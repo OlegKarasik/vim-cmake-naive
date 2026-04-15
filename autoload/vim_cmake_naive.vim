@@ -220,6 +220,17 @@ function! vim_cmake_naive#test() abort
   endtry
 endfunction
 
+function! vim_cmake_naive#make(bang, args) abort
+  try
+    call s:run_cmake_command(
+          \ 'CMakeBuild',
+          \ function('s:run_make_command_with_cmake_build_flow'),
+          \ [a:bang, a:args])
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
 function! vim_cmake_naive#run() abort
   try
     call s:run_cmake_command('CMakeRun', function('s:run_run'), [])
@@ -283,6 +294,29 @@ function! vim_cmake_naive#sync_startup_integration_files() abort
     endif
     call s:write_error(l:message)
   endtry
+endfunction
+
+function! vim_cmake_naive#register_make_command_abbrev() abort
+  if !s:as_condition_bool(get(g:, 'vim_cmake_naive_bridge_make_command', 1))
+    return
+  endif
+
+  cnoreabbrev <expr> make vim_cmake_naive#make_command_abbrev('make')
+  cnoreabbrev <expr> make! vim_cmake_naive#make_command_abbrev('make!')
+endfunction
+
+function! vim_cmake_naive#make_command_abbrev(typed_command) abort
+  if getcmdtype() !=# ':'
+    return a:typed_command
+  endif
+
+  let l:typed = trim(s:to_string_or_empty(a:typed_command))
+  let l:command_line = trim(getcmdline())
+  if l:command_line !=# l:typed
+    return a:typed_command
+  endif
+
+  return l:typed ==# 'make!' ? 'CMakeMake!' : 'CMakeMake'
 endfunction
 
 function! vim_cmake_naive#register_plug_mappings() abort
@@ -2531,22 +2565,25 @@ function! s:update_local_targets_cache(config_path, targets) abort
   return l:cache_path
 endfunction
 
-function! s:run_build() abort
-  let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
-  let l:config = s:read_json_object(l:config_path)
+function! s:build_context_from_config(config_path, config) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if type(a:config) != v:t_dict
+    throw 'Config payload must be a JSON object.'
+  endif
 
-  let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
+  let l:project_root = s:normalize_full_path(fnamemodify(a:config_path, ':h'))
+  let l:output_value = s:to_string_or_empty(get(a:config, s:cmake_config_output_key, s:cmake_config_default_output))
   if empty(trim(l:output_value))
     let l:output_value = s:cmake_config_default_output
   endif
 
-  let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
+  let l:preset_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_preset_key, '')))
   let l:build_directory = s:resolve_path(l:output_value, l:project_root)
   let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
   let l:build_target_directory = empty(l:preset_output_directory) ? l:build_directory : l:preset_output_directory
-  let l:target_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_target_key, '')))
+  let l:target_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_target_key, '')))
   let l:parallel_level = s:available_core_count()
 
   let l:argv = ['cmake', '--build', l:build_target_directory, '--parallel', string(l:parallel_level)]
@@ -2560,8 +2597,175 @@ function! s:run_build() abort
     call add(l:argv, l:target_value)
   endif
 
-  let l:build_terminal_name = s:cmake_build_terminal_running_name(l:preset_value, l:target_value)
-  call s:run_build_command_in_vertical_terminal(l:argv, {
+  return {
+        \ 'project_root': l:project_root,
+        \ 'build_target_directory': l:build_target_directory,
+        \ 'preset_value': l:preset_value,
+        \ 'target_value': l:target_value,
+        \ 'argv': l:argv
+        \ }
+endfunction
+
+function! s:configured_build_backend() abort
+  let l:backend = tolower(trim(s:to_string_or_empty(get(g:, 'vim_cmake_naive_build_backend', 'terminal'))))
+  if empty(l:backend)
+    let l:backend = 'terminal'
+  endif
+
+  if l:backend !=# 'terminal' && l:backend !=# 'make'
+    throw 'Unsupported CMakeBuild backend "' . l:backend . '". Expected "terminal" or "make".'
+  endif
+
+  return l:backend
+endfunction
+
+function! s:configured_make_errorformat() abort
+  return trim(s:to_string_or_empty(get(g:, 'vim_cmake_naive_make_errorformat', '')))
+endfunction
+
+function! s:should_open_quickfix_on_make_error() abort
+  return s:as_condition_bool(get(g:, 'vim_cmake_naive_open_quickfix_on_error', 0))
+endfunction
+
+function! s:should_sync_makeprg() abort
+  return s:as_condition_bool(get(g:, 'vim_cmake_naive_sync_makeprg', 0))
+endfunction
+
+function! s:shell_command_from_argv(argv) abort
+  if type(a:argv) != v:t_list || empty(a:argv)
+    throw 'Command arguments cannot be empty.'
+  endif
+
+  return join(map(copy(a:argv), 'shellescape(s:to_string_or_empty(v:val))'), ' ')
+endfunction
+
+function! s:quickfix_has_error_entries(quickfix_items) abort
+  for l:quickfix_item in a:quickfix_items
+    if toupper(s:to_string_or_empty(get(l:quickfix_item, 'type', ''))) ==# 'E'
+      return 1
+    endif
+  endfor
+
+  return 0
+endfunction
+
+function! s:report_make_backend_build_result(build_target_directory, project_root) abort
+  let l:quickfix_items = getqflist()
+  let l:quickfix_size = len(l:quickfix_items)
+  let l:has_error_entries = s:quickfix_has_error_entries(l:quickfix_items)
+  let l:has_build_failure = v:shell_error != 0 || l:has_error_entries
+  let l:quickfix_entry_suffix = l:quickfix_size == 1
+        \ ? '1 quickfix entry'
+        \ : l:quickfix_size . ' quickfix entries'
+  let l:build_directory = s:to_string_or_empty(a:build_target_directory)
+  let l:project_root = s:to_string_or_empty(a:project_root)
+  let l:build_relative_path = empty(l:project_root)
+        \ ? l:build_directory
+        \ : s:relative_path(l:build_directory, l:project_root)
+
+  if l:has_build_failure
+    if s:should_open_quickfix_on_make_error() && l:quickfix_size > 0
+      silent copen
+    endif
+
+    let l:failure_detail = v:shell_error != 0
+          \ ? 'exit code ' . v:shell_error
+          \ : 'quickfix errors'
+    call s:write_error(
+          \ 'Build failed with '
+          \ . l:failure_detail
+          \ . ' in '
+          \ . l:build_relative_path
+          \ . ' ('
+          \ . l:quickfix_entry_suffix
+          \ . ').')
+    return
+  endif
+
+  call s:write_info(
+        \ 'Build finished in '
+        \ . l:build_relative_path
+        \ . ' ('
+        \ . l:quickfix_entry_suffix
+        \ . ').')
+endfunction
+
+function! s:sync_makeprg_from_local_config(config_path, config) abort
+  if !s:should_sync_makeprg()
+    return
+  endif
+
+  let l:build_context = s:build_context_from_config(a:config_path, a:config)
+  let &g:makeprg = s:shell_command_from_argv(l:build_context.argv)
+
+  let l:errorformat_override = s:configured_make_errorformat()
+  if !empty(l:errorformat_override)
+    let &g:errorformat = l:errorformat_override
+  endif
+endfunction
+
+function! s:run_make_with_build_context(build_context, bang, command_arguments) abort
+  if type(a:build_context) != v:t_dict
+    throw 'Build context must be a JSON object.'
+  endif
+
+  let l:argv = get(a:build_context, 'argv', [])
+  let l:build_target_directory = s:to_string_or_empty(get(a:build_context, 'build_target_directory', ''))
+  let l:project_root = s:to_string_or_empty(get(a:build_context, 'project_root', ''))
+  let l:build_command = s:shell_command_from_argv(l:argv)
+  let l:errorformat_override = s:configured_make_errorformat()
+  let l:initial_makeprg = &l:makeprg
+  let l:initial_errorformat = &l:errorformat
+  let l:bang = trim(s:to_string_or_empty(a:bang))
+  let l:command_arguments = trim(s:to_string_or_empty(a:command_arguments))
+  let l:make_command = 'silent make' . (l:bang ==# '!' ? '!' : '')
+  if !empty(l:command_arguments)
+    let l:make_command .= ' ' . l:command_arguments
+  endif
+
+  try
+    let &l:makeprg = l:build_command
+    if !empty(l:errorformat_override)
+      let &l:errorformat = l:errorformat_override
+    endif
+    execute l:make_command
+  finally
+    let &l:makeprg = l:initial_makeprg
+    let &l:errorformat = l:initial_errorformat
+  endtry
+
+  call s:report_make_backend_build_result(l:build_target_directory, l:project_root)
+endfunction
+
+function! s:run_make_command_with_cmake_build_flow(bang, command_arguments) abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+  let l:build_context = s:build_context_from_config(l:config_path, l:config)
+  call s:run_make_with_build_context(l:build_context, a:bang, a:command_arguments)
+endfunction
+
+function! s:run_build_with_make_backend(build_context) abort
+  call s:run_make_with_build_context(a:build_context, '!', '')
+endfunction
+
+function! s:run_build() abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+
+  let l:build_context = s:build_context_from_config(l:config_path, l:config)
+  if s:configured_build_backend() ==# 'make'
+    call s:run_build_with_make_backend(l:build_context)
+    return
+  endif
+
+  let l:build_terminal_name = s:cmake_build_terminal_running_name(
+        \ l:build_context.preset_value,
+        \ l:build_context.target_value)
+  call s:run_build_command_in_vertical_terminal(l:build_context.argv, {
         \ 'reuse_previous_build_window': 1,
         \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
@@ -2570,7 +2774,7 @@ function! s:run_build() abort
         \ 'failure_terminal_name_prefix': 'Failure',
         \ 'command_name': 'CMakeBuild'
         \ })
-  call s:write_info('Started build in ' . s:relative_path(l:build_target_directory, l:project_root))
+  call s:write_info('Started build in ' . s:relative_path(l:build_context.build_target_directory, l:project_root))
 endfunction
 
 function! s:read_first_line_from_command(argv) abort
@@ -3021,8 +3225,7 @@ function! s:run_shell_command(argv) abort
     throw 'Command arguments cannot be empty.'
   endif
 
-  let l:escaped_arguments = map(copy(a:argv), 'shellescape(v:val)')
-  let l:output = systemlist(join(l:escaped_arguments, ' '))
+  let l:output = systemlist(s:shell_command_from_argv(a:argv))
   let l:exit_code = v:shell_error
   if l:exit_code != 0
     let l:detail = empty(l:output) ? '' : ': ' . join(l:output, "\n")
@@ -3870,6 +4073,7 @@ function! s:update_local_integration_files(config_path, config) abort
   call mkdir(fnamemodify(l:target_path, ':h'), 'p')
   call writefile([l:target_value], l:target_path, 'b')
   call writefile([l:output_value], l:output_path, 'b')
+  call s:sync_makeprg_from_local_config(a:config_path, a:config)
 endfunction
 
 function! s:resolve_switch_target_directory(target_name, build_directory) abort

@@ -49,6 +49,11 @@ These files are maintained in the [Root Directory](#root-directory):
 
 They are updated whenever local configuration is written.
 
+When `g:vim_cmake_naive_sync_makeprg` is enabled, config writes also sync global
+`makeprg` to the same `cmake --build ...` command used by `:CMakeBuild` (useful
+for tools that read `&makeprg`). If `g:vim_cmake_naive_make_errorformat` is
+set, config sync also writes that value to global `errorformat`.
+
 ## Startup
 
 During startup, the plugin:
@@ -70,6 +75,19 @@ During startup, the plugin:
 All public `:CMake*` commands run through a single lock.  If one command is
 already running, a new command is rejected with: `CMake: another command
 <CommandName> is already running`.
+
+## Manual `:make!` Bridge
+
+By default, typing `:make` / `:make!` is command-line-abbreviated to
+`:CMakeMake` / `:CMakeMake!`. That bridge uses the same build flow as
+`:CMakeBuild` make backend:
+
+1. resolves root/config and creates default config when missing
+2. uses the same computed `cmake --build ...` command
+3. keeps quickfix integration and applies `g:vim_cmake_naive_make_errorformat`
+4. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
+   enabled
+5. abbreviation bridge can be disabled with `g:vim_cmake_naive_bridge_make_command = 0`
 
 ## Terminal Reuse
 
@@ -201,11 +219,28 @@ the bottom.
    1. `$NUMBER_OF_PROCESSORS` first
    2. then platform commands (`sysctl` / `nproc` / `getconf`)
    3. fallback `1`
-5. Starts asynchronous terminal command:
+5. Builds command:
    1. `cmake --build <dir> --parallel <N>`
    2. adds `--preset <preset>` when preset is set
    3. adds `--target <target>` when target is set
-6. Uses plugin terminal split/reuse system.
+6. Chooses backend from `g:vim_cmake_naive_build_backend`:
+   1. `terminal` (default): asynchronous terminal split/reuse execution
+   2. `make`: synchronous `:make!` execution with quickfix population
+7. `make` backend options:
+   1. `g:vim_cmake_naive_make_errorformat` overrides `errorformat` for parsing
+   2. `g:vim_cmake_naive_open_quickfix_on_error` opens quickfix window on failure when set
+
+## CMakeMake
+
+1. Helper command used by `:make` / `:make!` abbreviation bridge.
+2. Resolves [Root Directory](#root-directory).
+3. Resolves [Local Configuration](#local-configuration), creating default config if
+   missing.
+4. Computes the same `cmake --build ...` command as [CMakeBuild](#cmakebuild).
+5. Runs `:make`/`:make!` with that command so quickfix is populated.
+6. Applies `g:vim_cmake_naive_make_errorformat` override when set.
+7. On failure, opens quickfix when `g:vim_cmake_naive_open_quickfix_on_error` is
+   enabled.
 
 ## CMakeTest
 
