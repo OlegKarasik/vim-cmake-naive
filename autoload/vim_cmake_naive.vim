@@ -296,29 +296,6 @@ function! vim_cmake_naive#sync_startup_integration_files() abort
   endtry
 endfunction
 
-function! vim_cmake_naive#register_make_command_abbrev() abort
-  if !s:as_condition_bool(get(g:, 'vim_cmake_naive_bridge_make_command', 1))
-    return
-  endif
-
-  cnoreabbrev <expr> make vim_cmake_naive#make_command_abbrev('make')
-  cnoreabbrev <expr> make! vim_cmake_naive#make_command_abbrev('make!')
-endfunction
-
-function! vim_cmake_naive#make_command_abbrev(typed_command) abort
-  if getcmdtype() !=# ':'
-    return a:typed_command
-  endif
-
-  let l:typed = trim(s:to_string_or_empty(a:typed_command))
-  let l:command_line = trim(getcmdline())
-  if l:command_line !=# l:typed
-    return a:typed_command
-  endif
-
-  return l:typed ==# 'make!' ? 'CMakeMake!' : 'CMakeMake'
-endfunction
-
 function! vim_cmake_naive#register_plug_mappings() abort
   call s:register_plug_mapping('<Plug>(CMakeConfig)', ':<C-u>CMakeConfig<CR>')
   call s:register_plug_mapping('<Plug>(CMakeConfigDefault)', ':<C-u>CMakeConfigDefault<CR>')
@@ -2606,25 +2583,48 @@ function! s:build_context_from_config(config_path, config) abort
         \ }
 endfunction
 
-function! s:configured_build_backend() abort
-  let l:backend = tolower(trim(s:to_string_or_empty(get(g:, 'vim_cmake_naive_build_backend', 'terminal'))))
-  if empty(l:backend)
-    let l:backend = 'terminal'
-  endif
-
-  if l:backend !=# 'terminal' && l:backend !=# 'make'
-    throw 'Unsupported CMakeBuild backend "' . l:backend . '". Expected "terminal" or "make".'
-  endif
-
-  return l:backend
-endfunction
-
 function! s:configured_make_errorformat() abort
   return trim(s:to_string_or_empty(get(g:, 'vim_cmake_naive_make_errorformat', '')))
 endfunction
 
 function! s:should_open_quickfix_on_make_error() abort
   return s:as_condition_bool(get(g:, 'vim_cmake_naive_open_quickfix_on_error', 0))
+endfunction
+
+function! s:active_quickfix_errorformat() abort
+  let l:errorformat_override = s:configured_make_errorformat()
+  if !empty(l:errorformat_override)
+    return l:errorformat_override
+  endif
+
+  return &g:errorformat
+endfunction
+
+function! s:terminal_output_quickfix_lines(buffer_number) abort
+  return s:build_terminal_non_empty_lines(a:buffer_number)
+endfunction
+
+function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number) abort
+  let l:errorformat = trim(s:active_quickfix_errorformat())
+  if empty(l:errorformat)
+    return
+  endif
+
+  let l:quickfix_lines = s:terminal_output_quickfix_lines(a:buffer_number)
+  try
+    call setqflist([], ' ', {
+          \ 'title': 'CMakeBuild',
+          \ 'efm': l:errorformat,
+          \ 'lines': l:quickfix_lines
+          \ })
+  catch
+    call s:write_error('Failed to populate quickfix from CMakeBuild output: ' . s:format_exception(v:exception))
+    return
+  endtry
+
+  if s:should_open_quickfix_on_make_error() && len(getqflist()) > 0
+    silent copen
+  endif
 endfunction
 
 function! s:should_sync_makeprg() abort
@@ -2746,10 +2746,6 @@ function! s:run_make_command_with_cmake_build_flow(bang, command_arguments) abor
   call s:run_make_with_build_context(l:build_context, a:bang, a:command_arguments)
 endfunction
 
-function! s:run_build_with_make_backend(build_context) abort
-  call s:run_make_with_build_context(a:build_context, '!', '')
-endfunction
-
 function! s:run_build() abort
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root(l:working_directory)
@@ -2757,10 +2753,6 @@ function! s:run_build() abort
   let l:config = s:read_json_object(l:config_path)
 
   let l:build_context = s:build_context_from_config(l:config_path, l:config)
-  if s:configured_build_backend() ==# 'make'
-    call s:run_build_with_make_backend(l:build_context)
-    return
-  endif
 
   let l:build_terminal_name = s:cmake_build_terminal_running_name(
         \ l:build_context.preset_value,
@@ -2772,6 +2764,7 @@ function! s:run_build() abort
         \ 'terminal_name': l:build_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
+        \ 'populate_quickfix_on_failure': 1,
         \ 'command_name': 'CMakeBuild'
         \ })
   call s:write_info('Started build in ' . s:relative_path(l:build_context.build_target_directory, l:project_root))
@@ -3274,6 +3267,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
+  let l:populate_quickfix_on_failure = s:as_condition_bool(get(l:options, 'populate_quickfix_on_failure', 0))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   if !empty(l:working_directory)
@@ -3293,6 +3287,7 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ 'terminal_name': l:terminal_name,
         \ 'success_terminal_name': l:success_terminal_name,
         \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix,
+        \ 'populate_quickfix_on_failure': l:populate_quickfix_on_failure,
         \ 'on_success_callback': l:OnSuccessCallback,
         \ 'reuse_group': l:reuse_group,
         \ 'working_directory': l:working_directory,
@@ -3652,6 +3647,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:command_name = trim(s:to_string_or_empty(get(l:options, 'command_name', '')))
+  let l:populate_quickfix_on_failure = s:as_condition_bool(get(l:options, 'populate_quickfix_on_failure', 0))
   let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
@@ -3669,7 +3665,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:command_name])
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:populate_quickfix_on_failure, l:command_name])
   endif
 
   let l:term_start_options = copy(l:term_options)
@@ -3727,6 +3723,9 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
     if l:exit_code == 0
       call s:invoke_terminal_success_callback(l:OnSuccessCallback)
     else
+      if l:populate_quickfix_on_failure
+        call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
+      endif
       call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
     endif
   endif
@@ -3749,7 +3748,7 @@ function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) a
   call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, command_name, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, populate_quickfix_on_failure, command_name, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     call s:set_terminal_name_for_window(
@@ -3768,6 +3767,9 @@ function! s:on_build_terminal_command_exit(window_id, success_terminal_name, fai
     if l:exit_code == 0
       call s:invoke_terminal_success_callback(l:OnSuccessCallback)
     else
+      if s:as_condition_bool(a:populate_quickfix_on_failure)
+        call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
+      endif
       call s:write_error('Command failed with exit code ' . l:exit_code . '. See build terminal window for details.')
     endif
   finally

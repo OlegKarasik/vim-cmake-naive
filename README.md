@@ -124,23 +124,20 @@ This command:
 - adds `--parallel <core_count>` to `cmake --build`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
-- supports two backends:
-  - `terminal` (default): asynchronous terminal preview window output
-  - `make`: synchronous `:make!` execution with quickfix population
-- with `make` backend:
-  - set `g:vim_cmake_naive_make_errorformat` to override `errorformat` for build parsing
-  - set `g:vim_cmake_naive_open_quickfix_on_error = 1` to auto-open quickfix window on failure
-- with `terminal` backend:
-  - opens a horizontal split terminal at the bottom and starts the build there asynchronously
-  - when started from a non-terminal window, limits build terminal height to at most 10 lines and never more than half of the main window height
-  - when started from an active terminal window, keeps terminal window size unchanged
-  - sets terminal status name while running to:
-    - `cmake build --preset=<preset> --target=<target>` when preset and target are set
-    - `cmake build --target=all` when target is empty
-    - omits `--preset=...` when preset is empty
-  - renames terminal status name on completion to `Success` or `Failure (<code>)`
-  - reuses previously opened visible build output window when possible; otherwise recreates it
-  - returns immediately; build completion and failures are reported in that terminal/messages
+- opens a horizontal split terminal at the bottom and starts the build there asynchronously
+- when started from a non-terminal window, limits build terminal height to at most 10 lines and never more than half of the main window height
+- when started from an active terminal window, keeps terminal window size unchanged
+- sets terminal status name while running to:
+  - `cmake build --preset=<preset> --target=<target>` when preset and target are set
+  - `cmake build --target=all` when target is empty
+  - omits `--preset=...` when preset is empty
+- renames terminal status name on completion to `Success` or `Failure (<code>)`
+- when the build fails, parses terminal output into quickfix entries
+  - uses `g:vim_cmake_naive_make_errorformat` when set
+  - otherwise uses Vim `errorformat`
+- when `g:vim_cmake_naive_open_quickfix_on_error = 1`, opens quickfix automatically for failed builds with parsed entries
+- reuses previously opened visible build output window when possible; otherwise recreates it
+- returns immediately; build completion and failures are reported in that terminal/messages
 
 Run build through Vim `:make`/quickfix flow:
 
@@ -356,36 +353,27 @@ root (`<output>` or `<output>/<preset>`).
 
 ## `:make` / quickfix integration
 
-By default, typing `:make`/`:make!` is routed to `:CMakeMake`/`:CMakeMake!`
-(command-line abbreviation), so it uses the same build flow as `:CMakeBuild`:
+Use `:CMakeMake`/`:CMakeMake!` directly to run the same build flow as
+`:CMakeBuild` through Vim quickfix:
 - resolves nearest CMake root and local config
 - creates default local config when missing
 - builds with the same `cmake --build ... --parallel ... [--preset] [--target]`
   command
 - reports the same success/failure summary and keeps quickfix population
 
-For scripts/non-interactive calls, use `:CMakeMake!` directly.
+For scripts/non-interactive calls, use `:CMakeMake!`.
 
 Optional global settings:
 
 ```vim
-" Keep default asynchronous terminal behavior:
-let g:vim_cmake_naive_build_backend = 'terminal'
-
-" Or run :CMakeBuild through :make! and quickfix:
-let g:vim_cmake_naive_build_backend = 'make'
-
-" Optional: disable :make/:make! command-line abbreviation bridge:
-let g:vim_cmake_naive_bridge_make_command = 0
-
 " Optional: keep global &makeprg synchronized whenever config is written
 " (useful for external tooling that reads &makeprg):
 let g:vim_cmake_naive_sync_makeprg = 1
 
-" Optional quickfix parser override used by :make! and make backend:
+" Optional quickfix parser override used by failed :CMakeBuild and :make! / :CMakeMake:
 let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %m'
 
-" Optional: open quickfix window automatically for failed :make! / make backend builds:
+" Optional: open quickfix window automatically for failed :CMakeBuild, :make! / :CMakeMake builds:
 let g:vim_cmake_naive_open_quickfix_on_error = 1
 ```
 

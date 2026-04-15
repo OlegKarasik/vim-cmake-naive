@@ -21,4 +21,3 @@ command! -nargs=+ CMakeConfigSetOutput call vim_cmake_naive#set_config_output(<q
 
 call vim_cmake_naive#register_plug_mappings()
 call vim_cmake_naive#sync_startup_integration_files()
-call vim_cmake_naive#register_make_command_abbrev()

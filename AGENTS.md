@@ -76,18 +76,16 @@ All public `:CMake*` commands run through a single lock.  If one command is
 already running, a new command is rejected with: `CMake: another command
 <CommandName> is already running`.
 
-## Manual `:make!` Bridge
+## Manual `:make!` Flow
 
-By default, typing `:make` / `:make!` is command-line-abbreviated to
-`:CMakeMake` / `:CMakeMake!`. That bridge uses the same build flow as
-`:CMakeBuild` make backend:
+Use `:CMakeMake` / `:CMakeMake!` directly when you want the Vim quickfix build
+flow. It uses the same `cmake --build ...` command resolution as `:CMakeBuild`:
 
 1. resolves root/config and creates default config when missing
 2. uses the same computed `cmake --build ...` command
 3. keeps quickfix integration and applies `g:vim_cmake_naive_make_errorformat`
 4. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
    enabled
-5. abbreviation bridge can be disabled with `g:vim_cmake_naive_bridge_make_command = 0`
 
 ## Terminal Reuse
 
@@ -223,16 +221,16 @@ the bottom.
    1. `cmake --build <dir> --parallel <N>`
    2. adds `--preset <preset>` when preset is set
    3. adds `--target <target>` when target is set
-6. Chooses backend from `g:vim_cmake_naive_build_backend`:
-   1. `terminal` (default): asynchronous terminal split/reuse execution
-   2. `make`: synchronous `:make!` execution with quickfix population
-7. `make` backend options:
-   1. `g:vim_cmake_naive_make_errorformat` overrides `errorformat` for parsing
-   2. `g:vim_cmake_naive_open_quickfix_on_error` opens quickfix window on failure when set
+6. Runs in the plugin terminal split/reuse backend (asynchronous).
+7. On failure, parses terminal output into quickfix entries:
+   1. uses `g:vim_cmake_naive_make_errorformat` when set
+   2. otherwise uses Vim `errorformat`
+   3. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is enabled and entries were parsed
 
 ## CMakeMake
 
-1. Helper command used by `:make` / `:make!` abbreviation bridge.
+1. Explicit command for running the Vim `:make` / `:make!` flow with plugin
+   config resolution.
 2. Resolves [Root Directory](#root-directory).
 3. Resolves [Local Configuration](#local-configuration), creating default config if
    missing.

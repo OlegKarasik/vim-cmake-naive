@@ -560,6 +560,11 @@ function! s:test_plugin_registers_plug_mappings_for_commands() abort
   call s:assert_plugin_plug_mappings(l:expected_mappings)
 endfunction
 
+function! s:test_plugin_does_not_register_make_command_abbrev() abort
+  call assert_equal('', maparg('make', 'c', 1))
+  call assert_equal('', maparg('make!', 'c', 1))
+endfunction
+
 function! s:test_plugin_startup_syncs_integration_files_from_local_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -2196,7 +2201,7 @@ function! s:test_cmake_build_sets_failure_terminal_name_with_exit_code() abort
   endtry
 endfunction
 
-function! s:test_cmake_build_make_backend_populates_quickfix() abort
+function! s:test_cmake_build_populates_quickfix_on_failure() abort
   if !has('unix')
     return
   endif
@@ -2204,24 +2209,27 @@ function! s:test_cmake_build_make_backend_populates_quickfix() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
-  let l:initial_backend = get(g:, 'vim_cmake_naive_build_backend', v:null)
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
   let l:initial_make_errorformat = get(g:, 'vim_cmake_naive_make_errorformat', v:null)
 
   try
-    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-make-backend.txt')
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-quickfix.txt')
     let l:bin_dir = s:create_fake_cmake_script_with_build_error(l:fixture.root, l:args_path, 2)
     let $PATH = l:bin_dir . ':' . l:initial_path
-    let g:vim_cmake_naive_build_backend = 'make'
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
     let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %trror: %m'
     call mkdir(s:path_join(l:fixture.root, 'src'), 'p')
     call writefile(['int main() { return 0; }'], s:path_join(l:fixture.root, 'src/main.cpp'), 'b')
     call setqflist([])
     silent! cclose
 
-    call vim_cmake_naive#close()
-    execute 'silent keepalt enew'
     execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:vim_cmake_naive_test_last_build_terminal
     call vim_cmake_naive#build()
+
+    let l:terminal = s:wait_for_captured_build_terminal_output('build backend failure', 1000)
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
@@ -2230,15 +2238,21 @@ function! s:test_cmake_build_make_backend_populates_quickfix() abort
           \ s:path_join(l:expected_root, 'build'))
 
     let l:quickfix = getqflist()
-    call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to contain entries from make backend build.')
-
-    let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, 'Build failed with') >= 0)
+    call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to contain entries from failed CMakeBuild output.')
+    call assert_equal(3, get(l:quickfix[0], 'lnum', 0))
+    call assert_equal(7, get(l:quickfix[0], 'col', 0))
+    call assert_true(stridx(get(l:quickfix[0], 'text', ''), 'build backend failure') >= 0)
   finally
-    if l:initial_backend is v:null
-      unlet! g:vim_cmake_naive_build_backend
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
     else
-      let g:vim_cmake_naive_build_backend = l:initial_backend
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
     endif
     if l:initial_make_errorformat is v:null
       unlet! g:vim_cmake_naive_make_errorformat
@@ -2249,13 +2263,12 @@ function! s:test_cmake_build_make_backend_populates_quickfix() abort
     call setqflist([])
     call vim_cmake_naive#close()
     execute 'silent keepalt enew'
-    let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
 endfunction
 
-function! s:test_cmake_build_make_backend_opens_quickfix_on_error_when_enabled() abort
+function! s:test_cmake_build_failure_opens_quickfix_when_enabled() abort
   if !has('unix')
     return
   endif
@@ -2263,15 +2276,16 @@ function! s:test_cmake_build_make_backend_opens_quickfix_on_error_when_enabled()
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
-  let l:initial_backend = get(g:, 'vim_cmake_naive_build_backend', v:null)
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
   let l:initial_make_errorformat = get(g:, 'vim_cmake_naive_make_errorformat', v:null)
   let l:initial_open_quickfix = get(g:, 'vim_cmake_naive_open_quickfix_on_error', v:null)
 
   try
-    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-make-backend-open-qf.txt')
-    let l:bin_dir = s:create_fake_cmake_script_with_build_error(l:fixture.root, l:args_path, 3)
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-quickfix-open-window.txt')
+    let l:bin_dir = s:create_fake_cmake_script_with_build_error(l:fixture.root, l:args_path, 2)
     let $PATH = l:bin_dir . ':' . l:initial_path
-    let g:vim_cmake_naive_build_backend = 'make'
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
     let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %trror: %m'
     let g:vim_cmake_naive_open_quickfix_on_error = 1
     call mkdir(s:path_join(l:fixture.root, 'src'), 'p')
@@ -2279,19 +2293,24 @@ function! s:test_cmake_build_make_backend_opens_quickfix_on_error_when_enabled()
     call setqflist([])
     silent! cclose
 
-    call vim_cmake_naive#close()
-    execute 'silent keepalt enew'
     execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:vim_cmake_naive_test_last_build_terminal
     call assert_equal(0, s:quickfix_window_count())
     call vim_cmake_naive#build()
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call assert_true(s:quickfix_window_count() > 0, 'Expected quickfix window to open for failed make backend build.')
+    call assert_true(s:quickfix_window_count() > 0, 'Expected quickfix window to open for failed CMakeBuild when enabled.')
   finally
-    if l:initial_backend is v:null
-      unlet! g:vim_cmake_naive_build_backend
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
     else
-      let g:vim_cmake_naive_build_backend = l:initial_backend
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
     endif
     if l:initial_make_errorformat is v:null
       unlet! g:vim_cmake_naive_make_errorformat
@@ -2307,7 +2326,6 @@ function! s:test_cmake_build_make_backend_opens_quickfix_on_error_when_enabled()
     call setqflist([])
     call vim_cmake_naive#close()
     execute 'silent keepalt enew'
-    let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -5859,6 +5877,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_switch_reports_missing_target_directory()
   call s:test_plugin_defines_plug_mappings_by_default()
   call s:test_plugin_registers_plug_mappings_for_commands()
+  call s:test_plugin_does_not_register_make_command_abbrev()
   call s:test_plugin_startup_syncs_integration_files_from_local_config()
   call s:test_plugin_startup_syncs_makeprg_when_enabled()
   call s:test_cmake_config_creates_default_local_config()
@@ -5900,8 +5919,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_opens_horizontal_terminal_with_command_output()
   call s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_output()
   call s:test_cmake_build_sets_failure_terminal_name_with_exit_code()
-  call s:test_cmake_build_make_backend_populates_quickfix()
-  call s:test_cmake_build_make_backend_opens_quickfix_on_error_when_enabled()
+  call s:test_cmake_build_populates_quickfix_on_failure()
+  call s:test_cmake_build_failure_opens_quickfix_when_enabled()
   call s:test_make_command_uses_cmake_build_flow_and_restores_local_options()
   call s:test_make_command_populates_quickfix_on_error_and_opens_window()
   call s:test_cmake_build_reuses_visible_output_window_when_possible()
