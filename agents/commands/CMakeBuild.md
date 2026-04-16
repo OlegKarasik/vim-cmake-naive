@@ -22,4 +22,5 @@
    2. otherwise uses Vim `errorformat`
    3. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
       enabled and entries were parsed
-
+   4. rewrites clang-style `note:` entries to
+      `<source line> (note: ...)` when source location is available

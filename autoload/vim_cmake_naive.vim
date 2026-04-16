@@ -220,17 +220,6 @@ function! vim_cmake_naive#test() abort
   endtry
 endfunction
 
-function! vim_cmake_naive#make(bang, args) abort
-  try
-    call s:run_cmake_command(
-          \ 'CMakeBuild',
-          \ function('s:run_make_command_with_cmake_build_flow'),
-          \ [a:bang, a:args])
-  catch
-    call s:write_error(s:format_exception(v:exception))
-  endtry
-endfunction
-
 function! vim_cmake_naive#run() abort
   try
     call s:run_cmake_command('CMakeRun', function('s:run_run'), [])
@@ -2600,6 +2589,104 @@ function! s:active_quickfix_errorformat() abort
   return &g:errorformat
 endfunction
 
+function! s:is_note_quickfix_entry(quickfix_item) abort
+  let l:text = s:to_string_or_empty(get(a:quickfix_item, 'text', ''))
+  if empty(l:text)
+    return 0
+  endif
+
+  let l:first_line = trim(get(split(l:text, "\n"), 0, ''))
+  return l:first_line =~? '^note:'
+endfunction
+
+function! s:quickfix_source_line_for_item(quickfix_item) abort
+  let l:line_number = str2nr(s:to_string_or_empty(get(a:quickfix_item, 'lnum', 0)))
+  if l:line_number <= 0
+    return ''
+  endif
+
+  let l:buffer_number = str2nr(s:to_string_or_empty(get(a:quickfix_item, 'bufnr', 0)))
+  if l:buffer_number > 0 && bufexists(l:buffer_number)
+    let l:buffer_lines = getbufline(l:buffer_number, l:line_number, l:line_number)
+    if len(l:buffer_lines) == 1
+      return trim(l:buffer_lines[0])
+    endif
+  endif
+
+  let l:file_path = trim(s:to_string_or_empty(get(a:quickfix_item, 'filename', '')))
+  if empty(l:file_path) && l:buffer_number > 0 && bufexists(l:buffer_number)
+    let l:file_path = trim(bufname(l:buffer_number))
+  endif
+  if empty(l:file_path)
+    return ''
+  endif
+
+  let l:full_path = s:normalize_full_path(l:file_path)
+  if !filereadable(l:full_path)
+    return ''
+  endif
+
+  let l:file_lines = readfile(l:full_path, 'b')
+  if len(l:file_lines) < l:line_number
+    return ''
+  endif
+
+  return trim(l:file_lines[l:line_number - 1])
+endfunction
+
+function! s:quickfix_note_summary_text(quickfix_item) abort
+  let l:text = s:to_string_or_empty(get(a:quickfix_item, 'text', ''))
+  if empty(l:text)
+    return ''
+  endif
+
+  let l:source_line = s:quickfix_source_line_for_item(a:quickfix_item)
+  if empty(l:source_line)
+    return l:text
+  endif
+
+  let l:note_line = trim(get(split(l:text, "\n"), 0, ''))
+  if empty(l:note_line)
+    return l:text
+  endif
+
+  return l:source_line . ' (' . l:note_line . ')'
+endfunction
+
+function! s:rewrite_note_quickfix_entries_with_source() abort
+  let l:quickfix_items = getqflist()
+  if type(l:quickfix_items) != v:t_list || empty(l:quickfix_items)
+    return
+  endif
+
+  let l:did_update_items = 0
+  for l:index in range(0, len(l:quickfix_items) - 1)
+    let l:quickfix_item = l:quickfix_items[l:index]
+    if type(l:quickfix_item) != v:t_dict || !s:is_note_quickfix_entry(l:quickfix_item)
+      continue
+    endif
+
+    let l:formatted_text = s:quickfix_note_summary_text(l:quickfix_item)
+    if empty(l:formatted_text) || l:formatted_text ==# s:to_string_or_empty(get(l:quickfix_item, 'text', ''))
+      continue
+    endif
+
+    let l:quickfix_item.text = l:formatted_text
+    let l:quickfix_items[l:index] = l:quickfix_item
+    let l:did_update_items = 1
+  endfor
+
+  if !l:did_update_items
+    return
+  endif
+
+  try
+    call setqflist(l:quickfix_items, 'r')
+  catch
+    call s:write_error('Failed to rewrite quickfix note entries: ' . s:format_exception(v:exception))
+  endtry
+endfunction
+
 function! s:terminal_output_quickfix_lines(buffer_number) abort
   return s:build_terminal_non_empty_lines(a:buffer_number)
 endfunction
@@ -2622,6 +2709,8 @@ function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number) ab
     return
   endtry
 
+  call s:rewrite_note_quickfix_entries_with_source()
+
   if s:should_open_quickfix_on_make_error() && len(getqflist()) > 0
     silent copen
   endif
@@ -2639,57 +2728,6 @@ function! s:shell_command_from_argv(argv) abort
   return join(map(copy(a:argv), 'shellescape(s:to_string_or_empty(v:val))'), ' ')
 endfunction
 
-function! s:quickfix_has_error_entries(quickfix_items) abort
-  for l:quickfix_item in a:quickfix_items
-    if toupper(s:to_string_or_empty(get(l:quickfix_item, 'type', ''))) ==# 'E'
-      return 1
-    endif
-  endfor
-
-  return 0
-endfunction
-
-function! s:report_make_backend_build_result(build_target_directory, project_root) abort
-  let l:quickfix_items = getqflist()
-  let l:quickfix_size = len(l:quickfix_items)
-  let l:has_error_entries = s:quickfix_has_error_entries(l:quickfix_items)
-  let l:has_build_failure = v:shell_error != 0 || l:has_error_entries
-  let l:quickfix_entry_suffix = l:quickfix_size == 1
-        \ ? '1 quickfix entry'
-        \ : l:quickfix_size . ' quickfix entries'
-  let l:build_directory = s:to_string_or_empty(a:build_target_directory)
-  let l:project_root = s:to_string_or_empty(a:project_root)
-  let l:build_relative_path = empty(l:project_root)
-        \ ? l:build_directory
-        \ : s:relative_path(l:build_directory, l:project_root)
-
-  if l:has_build_failure
-    if s:should_open_quickfix_on_make_error() && l:quickfix_size > 0
-      silent copen
-    endif
-
-    let l:failure_detail = v:shell_error != 0
-          \ ? 'exit code ' . v:shell_error
-          \ : 'quickfix errors'
-    call s:write_error(
-          \ 'Build failed with '
-          \ . l:failure_detail
-          \ . ' in '
-          \ . l:build_relative_path
-          \ . ' ('
-          \ . l:quickfix_entry_suffix
-          \ . ').')
-    return
-  endif
-
-  call s:write_info(
-        \ 'Build finished in '
-        \ . l:build_relative_path
-        \ . ' ('
-        \ . l:quickfix_entry_suffix
-        \ . ').')
-endfunction
-
 function! s:sync_makeprg_from_local_config(config_path, config) abort
   if !s:should_sync_makeprg()
     return
@@ -2702,48 +2740,6 @@ function! s:sync_makeprg_from_local_config(config_path, config) abort
   if !empty(l:errorformat_override)
     let &g:errorformat = l:errorformat_override
   endif
-endfunction
-
-function! s:run_make_with_build_context(build_context, bang, command_arguments) abort
-  if type(a:build_context) != v:t_dict
-    throw 'Build context must be a JSON object.'
-  endif
-
-  let l:argv = get(a:build_context, 'argv', [])
-  let l:build_target_directory = s:to_string_or_empty(get(a:build_context, 'build_target_directory', ''))
-  let l:project_root = s:to_string_or_empty(get(a:build_context, 'project_root', ''))
-  let l:build_command = s:shell_command_from_argv(l:argv)
-  let l:errorformat_override = s:configured_make_errorformat()
-  let l:initial_makeprg = &l:makeprg
-  let l:initial_errorformat = &l:errorformat
-  let l:bang = trim(s:to_string_or_empty(a:bang))
-  let l:command_arguments = trim(s:to_string_or_empty(a:command_arguments))
-  let l:make_command = 'silent make' . (l:bang ==# '!' ? '!' : '')
-  if !empty(l:command_arguments)
-    let l:make_command .= ' ' . l:command_arguments
-  endif
-
-  try
-    let &l:makeprg = l:build_command
-    if !empty(l:errorformat_override)
-      let &l:errorformat = l:errorformat_override
-    endif
-    execute l:make_command
-  finally
-    let &l:makeprg = l:initial_makeprg
-    let &l:errorformat = l:initial_errorformat
-  endtry
-
-  call s:report_make_backend_build_result(l:build_target_directory, l:project_root)
-endfunction
-
-function! s:run_make_command_with_cmake_build_flow(bang, command_arguments) abort
-  let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
-  let l:config = s:read_json_object(l:config_path)
-  let l:build_context = s:build_context_from_config(l:config_path, l:config)
-  call s:run_make_with_build_context(l:build_context, a:bang, a:command_arguments)
 endfunction
 
 function! s:run_build() abort

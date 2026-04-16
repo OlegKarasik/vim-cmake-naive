@@ -74,17 +74,6 @@ All public `:CMake*` commands run through a single lock. If one command is
 already running, a new command is rejected with:
 `CMake: another command <CommandName> is already running`.
 
-## Manual `:make!` Flow
-
-Use `:CMakeMake` / `:CMakeMake!` directly when you want the Vim quickfix build
-flow. It uses the same `cmake --build ...` command resolution as `:CMakeBuild`:
-
-1. resolves root/config and creates default config when missing
-2. uses the same computed `cmake --build ...` command
-3. keeps quickfix integration and applies `g:vim_cmake_naive_make_errorformat`
-4. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
-   enabled
-
 ## Terminal Reuse
 
 The following commands are run asynchronously and share the same Vim terminal

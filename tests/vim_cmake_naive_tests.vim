@@ -98,6 +98,22 @@ function! s:create_fake_cmake_script_with_build_error(root, args_output_path, ex
   return l:bin_dir
 endfunction
 
+function! s:create_fake_cmake_script_with_build_note(root, args_output_path, exit_code) abort
+  let l:bin_dir = s:path_join(a:root, 'fake-bin')
+  call mkdir(l:bin_dir, 'p')
+  let l:script_path = s:path_join(l:bin_dir, 'cmake')
+  call writefile([
+        \ '#!/bin/sh',
+        \ 'printf "%s\n" "$@" > ' . shellescape(a:args_output_path),
+        \ 'echo "src/main.cpp:3:7: note: ''mm_buffer'' declared here" >&2',
+        \ 'echo "  3 | MTL::CommandBuffer*         mm_buffer  = matrix_run_config.command_queue->commandBuffer();" >&2',
+        \ 'echo "    |                                 ^" >&2',
+        \ 'exit ' . string(a:exit_code)
+        \ ], l:script_path, 'b')
+  call system('chmod +x ' . shellescape(l:script_path))
+  return l:bin_dir
+endfunction
+
 function! s:create_fake_ctest_script(root, args_output_path, cwd_output_path, exit_code) abort
   let l:bin_dir = s:path_join(a:root, 'fake-bin')
   call mkdir(l:bin_dir, 'p')
@@ -563,6 +579,7 @@ endfunction
 function! s:test_plugin_does_not_register_make_command_abbrev() abort
   call assert_equal('', maparg('make', 'c', 1))
   call assert_equal('', maparg('make!', 'c', 1))
+  call assert_equal(0, exists(':CMakeMake'))
 endfunction
 
 function! s:test_plugin_startup_syncs_integration_files_from_local_config() abort
@@ -2268,6 +2285,77 @@ function! s:test_cmake_build_populates_quickfix_on_failure() abort
   endtry
 endfunction
 
+function! s:test_cmake_build_formats_note_quickfix_text_with_source_line() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+  let l:initial_make_errorformat = get(g:, 'vim_cmake_naive_make_errorformat', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-quickfix-note-formatting.txt')
+    let l:bin_dir = s:create_fake_cmake_script_with_build_note(l:fixture.root, l:args_path, 2)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %m,%-G%.%#'
+    call mkdir(s:path_join(l:fixture.root, 'src'), 'p')
+    call writefile([
+          \ '#include <Metal/Metal.hpp>',
+          \ 'void test_build_note() {}',
+          \ 'MTL::CommandBuffer*         mm_buffer  = matrix_run_config.command_queue->commandBuffer();'
+          \ ], s:path_join(l:fixture.root, 'src/main.cpp'), 'b')
+    call setqflist([])
+    silent! cclose
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:terminal = s:wait_for_captured_build_terminal_output('note: ''mm_buffer'' declared here', 1000)
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    call s:assert_cmake_build_parallel_args(
+          \ s:read_non_empty_lines(l:args_path),
+          \ s:path_join(l:expected_root, 'build'))
+
+    let l:quickfix = getqflist()
+    call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to contain entries from failed CMakeBuild output.')
+    call assert_equal(
+          \ 'MTL::CommandBuffer*         mm_buffer  = matrix_run_config.command_queue->commandBuffer(); (note: ''mm_buffer'' declared here)',
+          \ get(l:quickfix[0], 'text', ''))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    if l:initial_make_errorformat is v:null
+      unlet! g:vim_cmake_naive_make_errorformat
+    else
+      let g:vim_cmake_naive_make_errorformat = l:initial_make_errorformat
+    endif
+    silent! cclose
+    call setqflist([])
+    call vim_cmake_naive#close()
+    execute 'silent keepalt enew'
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_build_failure_opens_quickfix_when_enabled() abort
   if !has('unix')
     return
@@ -2326,117 +2414,6 @@ function! s:test_cmake_build_failure_opens_quickfix_when_enabled() abort
     call setqflist([])
     call vim_cmake_naive#close()
     execute 'silent keepalt enew'
-    execute 'cd ' . fnameescape(l:initial_cwd)
-    call delete(l:fixture.root, 'rf')
-  endtry
-endfunction
-
-function! s:test_make_command_uses_cmake_build_flow_and_restores_local_options() abort
-  if !has('unix')
-    return
-  endif
-
-  let l:fixture = s:create_cmake_project_fixture()
-  let l:initial_cwd = getcwd()
-  let l:initial_path = $PATH
-  let l:initial_local_makeprg = &l:makeprg
-  let l:initial_local_errorformat = &l:errorformat
-  let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-
-  try
-    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-manual-make.txt')
-    let l:bin_dir = s:create_fake_cmake_script(l:fixture.root, l:args_path, 0)
-    let $PATH = l:bin_dir . ':' . l:initial_path
-    call delete(l:config_path)
-    call setqflist([])
-    silent! cclose
-
-    call vim_cmake_naive#close()
-    execute 'silent keepalt enew'
-    execute 'cd ' . fnameescape(l:fixture.root)
-    let &l:makeprg = 'manual_makeprg_before_bridge'
-    let &l:errorformat = '%f'
-
-    execute 'silent CMakeMake!'
-
-    let l:expected_root = s:normalized_path(l:fixture.root)
-    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call s:assert_cmake_build_parallel_args(
-          \ s:read_non_empty_lines(l:args_path),
-          \ s:path_join(l:expected_root, 'build'))
-
-    call assert_true(filereadable(l:config_path), 'Expected default local config to be created for CMakeMake build flow.')
-    call assert_equal({'output': 'build', 'preset': '', 'build': 'Debug'}, s:read_json(l:config_path))
-    call assert_equal('manual_makeprg_before_bridge', &l:makeprg)
-    call assert_equal('%f', &l:errorformat)
-
-  finally
-    let &l:makeprg = l:initial_local_makeprg
-    let &l:errorformat = l:initial_local_errorformat
-    silent! cclose
-    call setqflist([])
-    call vim_cmake_naive#close()
-    execute 'silent keepalt enew'
-    let $PATH = l:initial_path
-    execute 'cd ' . fnameescape(l:initial_cwd)
-    call delete(l:fixture.root, 'rf')
-  endtry
-endfunction
-
-function! s:test_make_command_populates_quickfix_on_error_and_opens_window() abort
-  if !has('unix')
-    return
-  endif
-
-  let l:fixture = s:create_cmake_project_fixture()
-  let l:initial_cwd = getcwd()
-  let l:initial_path = $PATH
-  let l:initial_make_errorformat = get(g:, 'vim_cmake_naive_make_errorformat', v:null)
-  let l:initial_open_quickfix = get(g:, 'vim_cmake_naive_open_quickfix_on_error', v:null)
-
-  try
-    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-manual-make-error.txt')
-    let l:bin_dir = s:create_fake_cmake_script_with_build_error(l:fixture.root, l:args_path, 2)
-    let $PATH = l:bin_dir . ':' . l:initial_path
-    let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %trror: %m'
-    let g:vim_cmake_naive_open_quickfix_on_error = 1
-    call mkdir(s:path_join(l:fixture.root, 'src'), 'p')
-    call writefile(['int main() { return 0; }'], s:path_join(l:fixture.root, 'src/main.cpp'), 'b')
-    call setqflist([])
-    silent! cclose
-
-    call vim_cmake_naive#close()
-    execute 'silent keepalt enew'
-    execute 'cd ' . fnameescape(l:fixture.root)
-    call assert_equal(0, s:quickfix_window_count())
-    execute 'silent CMakeMake!'
-
-    let l:expected_root = s:normalized_path(l:fixture.root)
-    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    call s:assert_cmake_build_parallel_args(
-          \ s:read_non_empty_lines(l:args_path),
-          \ s:path_join(l:expected_root, 'build'))
-
-    let l:quickfix = getqflist()
-    call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to contain entries from CMakeMake build flow.')
-    call assert_true(s:quickfix_window_count() > 0, 'Expected quickfix window to open for failed CMakeMake build flow.')
-
-  finally
-    if l:initial_make_errorformat is v:null
-      unlet! g:vim_cmake_naive_make_errorformat
-    else
-      let g:vim_cmake_naive_make_errorformat = l:initial_make_errorformat
-    endif
-    if l:initial_open_quickfix is v:null
-      unlet! g:vim_cmake_naive_open_quickfix_on_error
-    else
-      let g:vim_cmake_naive_open_quickfix_on_error = l:initial_open_quickfix
-    endif
-    silent! cclose
-    call setqflist([])
-    call vim_cmake_naive#close()
-    execute 'silent keepalt enew'
-    let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -5920,9 +5897,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_output()
   call s:test_cmake_build_sets_failure_terminal_name_with_exit_code()
   call s:test_cmake_build_populates_quickfix_on_failure()
+  call s:test_cmake_build_formats_note_quickfix_text_with_source_line()
   call s:test_cmake_build_failure_opens_quickfix_when_enabled()
-  call s:test_make_command_uses_cmake_build_flow_and_restores_local_options()
-  call s:test_make_command_populates_quickfix_on_error_and_opens_window()
   call s:test_cmake_build_reuses_visible_output_window_when_possible()
   call s:test_cmake_build_does_not_resize_when_started_from_terminal_window()
   call s:test_cmake_generate_reuses_build_output_window_when_possible()

@@ -135,19 +135,10 @@ This command:
 - when the build fails, parses terminal output into quickfix entries
   - uses `g:vim_cmake_naive_make_errorformat` when set
   - otherwise uses Vim `errorformat`
+  - rewrites clang-style `note:` entries to `<source line> (note: ...)` when source location is available
 - when `g:vim_cmake_naive_open_quickfix_on_error = 1`, opens quickfix automatically for failed builds with parsed entries
 - reuses previously opened visible build output window when possible; otherwise recreates it
 - returns immediately; build completion and failures are reported in that terminal/messages
-
-Run build through Vim `:make`/quickfix flow:
-
-```vim
-:CMakeMake!
-```
-
-This command resolves/creates local config exactly like `:CMakeBuild`, computes
-the same `cmake --build ...` command, runs it via `:make!`, and reports the same
-build success/failure summary. Optional arguments are forwarded to `:make`.
 
 Run tests with CTest from local config:
 
@@ -351,18 +342,6 @@ an error (run `:CMakeConfig` or `:CMakeConfigDefault` first). It also updates
 root `.vim-cmake-naive-output` with the build directory path relative to the
 root (`<output>` or `<output>/<preset>`).
 
-## `:make` / quickfix integration
-
-Use `:CMakeMake`/`:CMakeMake!` directly to run the same build flow as
-`:CMakeBuild` through Vim quickfix:
-- resolves nearest CMake root and local config
-- creates default local config when missing
-- builds with the same `cmake --build ... --parallel ... [--preset] [--target]`
-  command
-- reports the same success/failure summary and keeps quickfix population
-
-For scripts/non-interactive calls, use `:CMakeMake!`.
-
 Optional global settings:
 
 ```vim
@@ -370,10 +349,10 @@ Optional global settings:
 " (useful for external tooling that reads &makeprg):
 let g:vim_cmake_naive_sync_makeprg = 1
 
-" Optional quickfix parser override used by failed :CMakeBuild and :make! / :CMakeMake:
+" Optional quickfix parser override used by failed :CMakeBuild:
 let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %m'
 
-" Optional: open quickfix window automatically for failed :CMakeBuild, :make! / :CMakeMake builds:
+" Optional: open quickfix window automatically for failed :CMakeBuild builds:
 let g:vim_cmake_naive_open_quickfix_on_error = 1
 ```
 

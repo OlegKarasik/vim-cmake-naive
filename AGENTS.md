@@ -29,7 +29,6 @@ Prefer the exact command-named file when prompt text mentions a command name.
 | `CMakeSwitchTarget` | `agents/commands/CMakeSwitchTarget.md` |
 | `CMakeGenerate` | `agents/commands/CMakeGenerate.md` |
 | `CMakeBuild` | `agents/commands/CMakeBuild.md` |
-| `CMakeMake`, `CMakeMake!`, `:make`, quickfix build flow | `agents/commands/CMakeMake.md` |
 | `CMakeTest` | `agents/commands/CMakeTest.md` |
 | `CMakeRun` | `agents/commands/CMakeRun.md` |
 | `CMakeClose` | `agents/commands/CMakeClose.md` |
