@@ -5,7 +5,7 @@
 
 `vim-cmake-naive` is a Vim plugin for working with CMake `compile_commands.json` files.
 
-It provides fourteen primary commands:
+It provides sixteen primary commands:
 
 - `:CMakeConfig`
 - `:CMakeConfigDefault`
@@ -16,6 +16,8 @@ It provides fourteen primary commands:
 - `:CMakeBuild`
 - `:CMakeTest`
 - `:CMakeRun`
+- `:CMakeShowPreview`
+- `:CMakeHidePreview`
 - `:CMakeClose`
 - `:CMakeInfo`
 - `:CMakeMenu`
@@ -95,18 +97,14 @@ This command:
   - adds `--fresh` to force clean cache regeneration
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
-- opens a horizontal split terminal at the bottom and starts generate there asynchronously
-- when started from a non-terminal window, limits generate terminal height to at most 10 lines and never more than half of the main window height
-- when started from an active terminal window, keeps terminal window size unchanged
+- starts generate asynchronously in a hidden plugin terminal buffer (no automatic preview window)
 - sets terminal status name while running to:
   - `cmake generate --preset=<preset>` when preset is set
   - `cmake generate` when preset is empty
-- renames terminal status name on completion to `Success` or `Failure (<code>)`
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
 - extracts discovered targets and stores them to `.vim-cmake-naive-cache.json` field `targets`
 - splits root `compile_commands.json` into target-local `compile_commands.json` files under corresponding target directories
-- reuses previously opened visible build/generate output window when possible; otherwise recreates it
-- returns immediately; completion/failures are reported in that terminal/messages
+- returns immediately; start progress and completion result are reported in messages
 
 Build project with CMake from local config:
 
@@ -124,20 +122,16 @@ This command:
 - adds `--parallel <core_count>` to `cmake --build`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
-- opens a horizontal split terminal at the bottom and starts the build there asynchronously
-- when started from a non-terminal window, limits build terminal height to at most 10 lines and never more than half of the main window height
-- when started from an active terminal window, keeps terminal window size unchanged
+- starts build asynchronously in a hidden plugin terminal buffer (no automatic preview window)
 - sets terminal status name while running to:
   - `cmake build --preset=<preset> --target=<target>` when preset and target are set
   - `cmake build --target=all` when target is empty
   - omits `--preset=...` when preset is empty
-- renames terminal status name on completion to `Success` or `Failure (<code>)`
 - when the build fails, parses terminal output into quickfix entries
   - uses `g:vim_cmake_naive_make_errorformat` when set
   - otherwise uses Vim `errorformat`
 - when `g:vim_cmake_naive_open_quickfix_on_error = 1`, opens quickfix automatically for failed builds with parsed entries
-- reuses previously opened visible build output window when possible; otherwise recreates it
-- returns immediately; build completion and failures are reported in that terminal/messages
+- returns immediately; start progress and completion result are reported in messages
 
 Run build through Vim `:make`/quickfix flow:
 
@@ -164,15 +158,11 @@ This command:
   - `<output>/<preset>` when preset is non-empty
 - detects available core count (minimum `1`)
 - runs `ctest --parallel <core_count>` in that working directory
-- opens a horizontal split terminal at the bottom and starts tests there asynchronously
-- when started from a non-terminal window, limits test terminal height to at most 10 lines and never more than half of the main window height
-- when started from an active terminal window, keeps terminal window size unchanged
+- starts tests asynchronously in a hidden plugin terminal buffer (no automatic preview window)
 - sets terminal status name while running to:
   - `ctest --preset=<preset>` when preset is set
   - `ctest` when preset is empty
-- renames terminal status name on completion to `Success` or `Failure (<code>)`
-- reuses previously opened visible build/generate/test output window when possible; otherwise recreates it
-- returns immediately; test completion and failures are reported in that terminal/messages
+- returns immediately; start progress and completion result are reported in messages
 
 Run current target from local config:
 
@@ -190,15 +180,32 @@ This command:
   - `<output>/<preset>` when preset is non-empty
 - searches for an executable file matching the selected target under that run directory
 - runs the discovered executable in that run directory
-- opens a horizontal split terminal at the bottom and starts execution there asynchronously
-- when started from a non-terminal window, limits run terminal height to at most 10 lines and never more than half of the main window height
-- when started from an active terminal window, keeps terminal window size unchanged
+- starts execution asynchronously in a hidden plugin terminal buffer (no automatic preview window)
 - sets terminal status name while running to:
   - `cmake run --preset=<preset> --target=<target>` when preset is set
   - `cmake run --target=<target>` when preset is empty
-- renames terminal status name on completion to `Success` or `Failure (<code>)`
-- reuses previously opened visible build/generate/test/run output window when possible; otherwise recreates it
-- returns immediately; completion/failures are reported in that terminal/messages
+- returns immediately; start progress and completion result are reported in messages
+
+Show preview window with the most recent CMake terminal output:
+
+```vim
+:CMakeShowPreview
+```
+
+This command:
+- opens/reuses a bottom preview window
+- shows terminal output from the most recent `:CMakeGenerate`, `:CMakeBuild`, `:CMakeTest`, or `:CMakeRun`
+- reports an error when no recent CMake terminal output is available
+
+Hide visible CMake preview windows:
+
+```vim
+:CMakeHidePreview
+```
+
+This command:
+- closes visible preview windows containing plugin CMake terminal output
+- keeps terminal buffers hidden so `:CMakeShowPreview` can reopen them later
 
 Close CMake terminal windows spawned by generate/build/test/run:
 

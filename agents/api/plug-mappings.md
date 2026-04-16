@@ -16,10 +16,11 @@ The plugin registers `<Plug>(...)` mappings for all public commands:
 7. `<Plug>(CMakeBuild)`
 8. `<Plug>(CMakeTest)`
 9. `<Plug>(CMakeRun)`
-10. `<Plug>(CMakeClose)`
-11. `<Plug>(CMakeInfo)`
-12. `<Plug>(CMakeMenu)`
-13. `<Plug>(CMakeMenuFull)`
-14. `<Plug>(CMakeConfigSetOutput)` (opens command-line with trailing space for
+10. `<Plug>(CMakeShowPreview)`
+11. `<Plug>(CMakeHidePreview)`
+12. `<Plug>(CMakeClose)`
+13. `<Plug>(CMakeInfo)`
+14. `<Plug>(CMakeMenu)`
+15. `<Plug>(CMakeMenuFull)`
+16. `<Plug>(CMakeConfigSetOutput)` (opens command-line with trailing space for
     argument entry)
-

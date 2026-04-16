@@ -11,5 +11,6 @@
 4. Ensures test directory exists.
 5. Starts asynchronous terminal command in that directory:
    1. `ctest --parallel <N>`
-6. Uses plugin terminal split/reuse system.
-
+6. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
+   preview window).
+7. Reports progress when started and final result (success/failure) via messages.

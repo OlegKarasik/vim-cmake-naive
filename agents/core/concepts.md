@@ -88,12 +88,17 @@ flow. It uses the same `cmake --build ...` command resolution as `:CMakeBuild`:
 ## Terminal Reuse
 
 The following commands are run asynchronously and share the same Vim terminal
-window:
+backend:
 
 1. `CMakeBuild`
 2. `CMakeTest`
 3. `CMakeRun`
 4. `CMakeGenerate`
 
-Terminal output is shown in the Vim preview window. Preview window is created at
-the bottom.
+By default, these commands do not open preview windows automatically. They run in
+hidden terminal buffers and report progress/start and final operation result via
+messages.
+
+Use `CMakeShowPreview` to show the most recent hidden terminal output in a preview
+window, and `CMakeHidePreview` to hide preview windows without wiping those
+terminal buffers.

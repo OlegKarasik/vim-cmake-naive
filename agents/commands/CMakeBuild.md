@@ -16,10 +16,11 @@
    1. `cmake --build <dir> --parallel <N>`
    2. adds `--preset <preset>` when preset is set
    3. adds `--target <target>` when target is set
-6. Runs in the plugin terminal split/reuse backend (asynchronous).
-7. On failure, parses terminal output into quickfix entries:
+6. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
+   preview window).
+7. Reports progress when started and final result (success/failure) via messages.
+8. On failure, parses terminal output into quickfix entries:
    1. uses `g:vim_cmake_naive_make_errorformat` when set
    2. otherwise uses Vim `errorformat`
    3. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
       enabled and entries were parsed
-

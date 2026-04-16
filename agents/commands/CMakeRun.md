@@ -19,5 +19,6 @@
    5. requires exactly one executable match
 6. Starts asynchronous terminal command for discovered executable in run
    directory.
-7. Uses plugin terminal split/reuse system.
-
+7. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
+   preview window).
+8. Reports progress when started and final result (success/failure) via messages.

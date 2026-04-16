@@ -7,6 +7,7 @@ This repository uses split agent guidance. Load only files that match the prompt
 1. DO NOT create or edit files outside of repository.
 2. DO NOT redirect output from commands into files outside of repository.
 3. DO NOT take dependencies on other plugins.
+4. When waiting for command output, never wait longer than 90 seconds per check.
 
 ## Core Docs
 
@@ -32,6 +33,8 @@ Prefer the exact command-named file when prompt text mentions a command name.
 | `CMakeMake`, `CMakeMake!`, `:make`, quickfix build flow | `agents/commands/CMakeMake.md` |
 | `CMakeTest` | `agents/commands/CMakeTest.md` |
 | `CMakeRun` | `agents/commands/CMakeRun.md` |
+| `CMakeShowPreview` | `agents/commands/CMakeShowPreview.md` |
+| `CMakeHidePreview` | `agents/commands/CMakeHidePreview.md` |
 | `CMakeClose` | `agents/commands/CMakeClose.md` |
 | `CMakeInfo` | `agents/commands/CMakeInfo.md` |
 | `CMakeMenu` | `agents/commands/CMakeMenu.md` |
