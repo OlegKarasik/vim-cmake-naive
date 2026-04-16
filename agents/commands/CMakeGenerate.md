@@ -13,9 +13,11 @@
    1. `cmake -S <root> -B <generation-dir> --fresh -DCMAKE_BUILD_TYPE=<build>`
    2. adds `--preset <preset>` when preset is non-empty
 6. Runs in hidden plugin terminal buffer by default (no automatic preview window).
-7. Reports progress when started and reports final result (success/failure) via
+7. While running, sets Vim status line to the terminal title for this command
+   using Vim built-in warning highlight group `WarningMsg`.
+8. Reports progress when started and reports final result (success/failure) via
    messages.
-8. On successful completion:
+9. On successful completion:
    1. reads root `compile_commands.json` from scan directory
    2. discovers available targets
    3. updates `.vim-cmake-naive-cache.json` key `targets`

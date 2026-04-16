@@ -98,7 +98,7 @@ This command:
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
 - starts generate asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal status name while running to:
+- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
   - `cmake generate --preset=<preset>` when preset is set
   - `cmake generate` when preset is empty
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
@@ -123,25 +123,16 @@ This command:
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
 - starts build asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal status name while running to:
+- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
   - `cmake build --preset=<preset> --target=<target>` when preset and target are set
   - `cmake build --target=all` when target is empty
   - omits `--preset=...` when preset is empty
+- clears existing quickfix entries before each build run
 - when the build fails, parses terminal output into quickfix entries
   - uses `g:vim_cmake_naive_make_errorformat` when set
   - otherwise uses Vim `errorformat`
 - when `g:vim_cmake_naive_open_quickfix_on_error = 1`, opens quickfix automatically for failed builds with parsed entries
 - returns immediately; start progress and completion result are reported in messages
-
-Run build through Vim `:make`/quickfix flow:
-
-```vim
-:CMakeMake!
-```
-
-This command resolves/creates local config exactly like `:CMakeBuild`, computes
-the same `cmake --build ...` command, runs it via `:make!`, and reports the same
-build success/failure summary. Optional arguments are forwarded to `:make`.
 
 Run tests with CTest from local config:
 
@@ -159,7 +150,7 @@ This command:
 - detects available core count (minimum `1`)
 - runs `ctest --parallel <core_count>` in that working directory
 - starts tests asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal status name while running to:
+- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
   - `ctest --preset=<preset>` when preset is set
   - `ctest` when preset is empty
 - returns immediately; start progress and completion result are reported in messages
@@ -181,7 +172,7 @@ This command:
 - searches for an executable file matching the selected target under that run directory
 - runs the discovered executable in that run directory
 - starts execution asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal status name while running to:
+- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
   - `cmake run --preset=<preset> --target=<target>` when preset is set
   - `cmake run --target=<target>` when preset is empty
 - returns immediately; start progress and completion result are reported in messages
@@ -358,18 +349,6 @@ an error (run `:CMakeConfig` or `:CMakeConfigDefault` first). It also updates
 root `.vim-cmake-naive-output` with the build directory path relative to the
 root (`<output>` or `<output>/<preset>`).
 
-## `:make` / quickfix integration
-
-Use `:CMakeMake`/`:CMakeMake!` directly to run the same build flow as
-`:CMakeBuild` through Vim quickfix:
-- resolves nearest CMake root and local config
-- creates default local config when missing
-- builds with the same `cmake --build ... --parallel ... [--preset] [--target]`
-  command
-- reports the same success/failure summary and keeps quickfix population
-
-For scripts/non-interactive calls, use `:CMakeMake!`.
-
 Optional global settings:
 
 ```vim
@@ -377,11 +356,14 @@ Optional global settings:
 " (useful for external tooling that reads &makeprg):
 let g:vim_cmake_naive_sync_makeprg = 1
 
-" Optional quickfix parser override used by failed :CMakeBuild and :make! / :CMakeMake:
+" Optional quickfix parser override used by failed :CMakeBuild:
 let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %m'
 
-" Optional: open quickfix window automatically for failed :CMakeBuild, :make! / :CMakeMake builds:
+" Optional: open quickfix window automatically for failed :CMakeBuild builds:
 let g:vim_cmake_naive_open_quickfix_on_error = 1
+
+" Optional: customize WarningMsg colors globally (affects all WarningMsg usage):
+highlight WarningMsg ctermfg=0 ctermbg=11 guifg=#000000 guibg=#ffd75f
 ```
 
 ## Notes

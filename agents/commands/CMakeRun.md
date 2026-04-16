@@ -21,4 +21,6 @@
    directory.
 7. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
    preview window).
-8. Reports progress when started and final result (success/failure) via messages.
+8. While running, sets Vim status line to the terminal title for this command
+   using Vim built-in warning highlight group `WarningMsg`.
+9. Reports progress when started and final result (success/failure) via messages.

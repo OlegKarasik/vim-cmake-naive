@@ -36,6 +36,9 @@ let s:last_cmake_terminal_buffer_number = -1
 let s:running_cmake_command_name = ''
 let s:keep_running_cmake_command_lock = 0
 let s:running_cmake_command_lock_source = ''
+let s:running_terminal_statusline_active = 0
+let s:running_terminal_statusline_previous = ''
+let s:running_terminal_statusline_command_name = ''
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
 let s:cmake_missing_preview_terminal_error =
@@ -105,6 +108,40 @@ function! s:active_running_cmake_command() abort
   return s:running_cmake_command_name
 endfunction
 
+function! s:statusline_text_for_terminal_title(title) abort
+  let l:title = substitute(s:to_string_or_empty(a:title), '%', '%%', 'g')
+  return '%#WarningMsg#' . l:title . '%*'
+endfunction
+
+function! s:hold_running_terminal_statusline(command_name, terminal_title) abort
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
+  if empty(l:command_name) || empty(l:terminal_title)
+    return
+  endif
+
+  if !s:running_terminal_statusline_active
+    let s:running_terminal_statusline_previous = &g:statusline
+  endif
+  let s:running_terminal_statusline_active = 1
+  let s:running_terminal_statusline_command_name = l:command_name
+  let &g:statusline = s:statusline_text_for_terminal_title(l:terminal_title)
+endfunction
+
+function! s:release_running_terminal_statusline(command_name) abort
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  if !s:running_terminal_statusline_active
+        \ || empty(l:command_name)
+        \ || s:running_terminal_statusline_command_name !=# l:command_name
+    return
+  endif
+
+  let &g:statusline = s:running_terminal_statusline_previous
+  let s:running_terminal_statusline_active = 0
+  let s:running_terminal_statusline_previous = ''
+  let s:running_terminal_statusline_command_name = ''
+endfunction
+
 function! s:run_cmake_command(command_name, command_funcref, command_args) abort
   let l:running_command = s:active_running_cmake_command()
   if !empty(l:running_command)
@@ -128,6 +165,7 @@ endfunction
 function! s:hold_running_cmake_command_lock(command_name, ...) abort
   let l:command_name = trim(s:to_string_or_empty(a:command_name))
   let l:lock_source = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : 'manual')
+  let l:terminal_title = trim(a:0 > 1 ? s:to_string_or_empty(a:2) : '')
   if empty(l:command_name)
     return
   endif
@@ -138,6 +176,9 @@ function! s:hold_running_cmake_command_lock(command_name, ...) abort
   if s:running_cmake_command_name ==# l:command_name
     let s:keep_running_cmake_command_lock = 1
     let s:running_cmake_command_lock_source = l:lock_source
+    if l:lock_source ==# 'terminal'
+      call s:hold_running_terminal_statusline(l:command_name, l:terminal_title)
+    endif
   endif
 endfunction
 
@@ -148,6 +189,7 @@ function! s:release_running_cmake_command_lock(command_name) abort
   endif
 
   if s:running_cmake_command_name ==# l:command_name
+    call s:release_running_terminal_statusline(l:command_name)
     let s:running_cmake_command_name = ''
     let s:running_cmake_command_lock_source = ''
   endif
@@ -260,17 +302,6 @@ endfunction
 function! vim_cmake_naive#test() abort
   try
     call s:run_cmake_command('CMakeTest', function('s:run_test'), [])
-  catch
-    call s:write_error(s:format_exception(v:exception))
-  endtry
-endfunction
-
-function! vim_cmake_naive#make(bang, args) abort
-  try
-    call s:run_cmake_command(
-          \ 'CMakeBuild',
-          \ function('s:run_make_command_with_cmake_build_flow'),
-          \ [a:bang, a:args])
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -2668,6 +2699,10 @@ function! s:terminal_output_quickfix_lines(buffer_number) abort
   return s:build_terminal_non_empty_lines(a:buffer_number)
 endfunction
 
+function! s:clear_quickfix_entries() abort
+  call setqflist([])
+endfunction
+
 function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number) abort
   let l:errorformat = trim(s:active_quickfix_errorformat())
   if empty(l:errorformat)
@@ -2703,57 +2738,6 @@ function! s:shell_command_from_argv(argv) abort
   return join(map(copy(a:argv), 'shellescape(s:to_string_or_empty(v:val))'), ' ')
 endfunction
 
-function! s:quickfix_has_error_entries(quickfix_items) abort
-  for l:quickfix_item in a:quickfix_items
-    if toupper(s:to_string_or_empty(get(l:quickfix_item, 'type', ''))) ==# 'E'
-      return 1
-    endif
-  endfor
-
-  return 0
-endfunction
-
-function! s:report_make_backend_build_result(build_target_directory, project_root) abort
-  let l:quickfix_items = getqflist()
-  let l:quickfix_size = len(l:quickfix_items)
-  let l:has_error_entries = s:quickfix_has_error_entries(l:quickfix_items)
-  let l:has_build_failure = v:shell_error != 0 || l:has_error_entries
-  let l:quickfix_entry_suffix = l:quickfix_size == 1
-        \ ? '1 quickfix entry'
-        \ : l:quickfix_size . ' quickfix entries'
-  let l:build_directory = s:to_string_or_empty(a:build_target_directory)
-  let l:project_root = s:to_string_or_empty(a:project_root)
-  let l:build_relative_path = empty(l:project_root)
-        \ ? l:build_directory
-        \ : s:relative_path(l:build_directory, l:project_root)
-
-  if l:has_build_failure
-    if s:should_open_quickfix_on_make_error() && l:quickfix_size > 0
-      silent copen
-    endif
-
-    let l:failure_detail = v:shell_error != 0
-          \ ? 'exit code ' . v:shell_error
-          \ : 'quickfix errors'
-    call s:write_error(
-          \ 'Build failed with '
-          \ . l:failure_detail
-          \ . ' in '
-          \ . l:build_relative_path
-          \ . ' ('
-          \ . l:quickfix_entry_suffix
-          \ . ').')
-    return
-  endif
-
-  call s:write_info(
-        \ 'Build finished in '
-        \ . l:build_relative_path
-        \ . ' ('
-        \ . l:quickfix_entry_suffix
-        \ . ').')
-endfunction
-
 function! s:sync_makeprg_from_local_config(config_path, config) abort
   if !s:should_sync_makeprg()
     return
@@ -2766,48 +2750,6 @@ function! s:sync_makeprg_from_local_config(config_path, config) abort
   if !empty(l:errorformat_override)
     let &g:errorformat = l:errorformat_override
   endif
-endfunction
-
-function! s:run_make_with_build_context(build_context, bang, command_arguments) abort
-  if type(a:build_context) != v:t_dict
-    throw 'Build context must be a JSON object.'
-  endif
-
-  let l:argv = get(a:build_context, 'argv', [])
-  let l:build_target_directory = s:to_string_or_empty(get(a:build_context, 'build_target_directory', ''))
-  let l:project_root = s:to_string_or_empty(get(a:build_context, 'project_root', ''))
-  let l:build_command = s:shell_command_from_argv(l:argv)
-  let l:errorformat_override = s:configured_make_errorformat()
-  let l:initial_makeprg = &l:makeprg
-  let l:initial_errorformat = &l:errorformat
-  let l:bang = trim(s:to_string_or_empty(a:bang))
-  let l:command_arguments = trim(s:to_string_or_empty(a:command_arguments))
-  let l:make_command = 'silent make' . (l:bang ==# '!' ? '!' : '')
-  if !empty(l:command_arguments)
-    let l:make_command .= ' ' . l:command_arguments
-  endif
-
-  try
-    let &l:makeprg = l:build_command
-    if !empty(l:errorformat_override)
-      let &l:errorformat = l:errorformat_override
-    endif
-    execute l:make_command
-  finally
-    let &l:makeprg = l:initial_makeprg
-    let &l:errorformat = l:initial_errorformat
-  endtry
-
-  call s:report_make_backend_build_result(l:build_target_directory, l:project_root)
-endfunction
-
-function! s:run_make_command_with_cmake_build_flow(bang, command_arguments) abort
-  let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
-  let l:config = s:read_json_object(l:config_path)
-  let l:build_context = s:build_context_from_config(l:config_path, l:config)
-  call s:run_make_with_build_context(l:build_context, a:bang, a:command_arguments)
 endfunction
 
 function! s:run_build() abort
@@ -3485,6 +3427,9 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
   let l:populate_quickfix_on_failure = s:as_condition_bool(get(l:options, 'populate_quickfix_on_failure', 0))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
+  if l:populate_quickfix_on_failure
+    call s:clear_quickfix_entries()
+  endif
   if !empty(l:working_directory)
     let l:working_directory = s:normalize_full_path(l:working_directory)
     if !isdirectory(l:working_directory)
@@ -3622,7 +3567,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   call s:capture_build_terminal_for_tests(-1, l:terminal_buffer_number)
 
   if !s:should_capture_build_terminal_for_tests()
-    call s:hold_running_cmake_command_lock(l:command_name, 'terminal')
+    call s:hold_running_cmake_command_lock(l:command_name, 'terminal', l:terminal_name)
     return
   endif
 
@@ -4165,7 +4110,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   call s:set_running_terminal_name(a:window_id, l:terminal_name, l:terminal_buffer_number)
   call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   if !s:should_capture_build_terminal_for_tests()
-    call s:hold_running_cmake_command_lock(l:command_name, 'terminal')
+    call s:hold_running_cmake_command_lock(l:command_name, 'terminal', l:terminal_name)
   endif
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
