@@ -215,20 +215,34 @@ function! s:wait_for_running_terminal_window(timeout_ms) abort
   return 0
 endfunction
 
-function! s:wait_for_global_statusline_value(statusline_value, timeout_ms) abort
-  let l:expected_statusline = '%#WarningMsg#'
-        \ . substitute(a:statusline_value, '%', '%%', 'g')
-        \ . '%*'
+function! s:has_running_progress_message(terminal_title) abort
+  let l:terminal_title = trim(a:terminal_title)
+  if empty(l:terminal_title)
+    return 0
+  endif
+
+  for l:message_line in split(execute('messages'), "\n")
+    if stridx(l:message_line, l:terminal_title) < 0
+          \ || l:message_line !~# '^\[vim-cmake-naive\] [0-9]\+% '
+      continue
+    endif
+    return 1
+  endfor
+
+  return 0
+endfunction
+
+function! s:wait_for_running_progress_message(terminal_title, timeout_ms) abort
   let l:elapsed = 0
   while l:elapsed < a:timeout_ms
-    if &g:statusline ==# l:expected_statusline
+    if s:has_running_progress_message(a:terminal_title)
       return 1
     endif
     sleep 10m
     let l:elapsed += 10
   endwhile
 
-  return &g:statusline ==# l:expected_statusline
+  return s:has_running_progress_message(a:terminal_title)
 endfunction
 
 function! s:wait_for_terminal_buffer_completion(buffer_number, timeout_ms) abort
@@ -321,6 +335,72 @@ function! s:plugin_preview_window_count() abort
         \ getwininfo(),
         \ 'getwinvar(get(v:val, "winid", 0), "&previewwindow", 0)'
         \ . ' && getbufvar(get(v:val, "bufnr", -1), "vim_cmake_naive_build_terminal", 0)'))
+endfunction
+
+function! s:plugin_preview_buffer_number() abort
+  if !exists('*getwininfo')
+    return -1
+  endif
+
+  for l:window_info in getwininfo()
+    let l:window_id = get(l:window_info, 'winid', 0)
+    let l:buffer_number = get(l:window_info, 'bufnr', -1)
+    if l:window_id <= 0 || l:buffer_number <= 0
+      continue
+    endif
+    if getwinvar(l:window_id, '&previewwindow', 0)
+          \ && getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+      return l:buffer_number
+    endif
+  endfor
+
+  return -1
+endfunction
+
+function! s:terminal_buffer_non_empty_lines(buffer_number) abort
+  if a:buffer_number <= 0 || !bufexists(a:buffer_number)
+    return []
+  endif
+
+  if getbufvar(a:buffer_number, '&buftype', '') ==# 'terminal' && exists('*term_getline')
+    let l:lines = []
+    let l:index = 1
+    while l:index <= 500
+      try
+        let l:line = term_getline(a:buffer_number, l:index)
+      catch
+        break
+      endtry
+
+      if type(l:line) == v:t_string
+        let l:line = substitute(l:line, '\r', '', 'g')
+        if !empty(trim(l:line))
+          call add(l:lines, l:line)
+        endif
+      endif
+      let l:index += 1
+    endwhile
+    return l:lines
+  endif
+
+  return filter(getbufline(a:buffer_number, 1, '$'), '!empty(trim(v:val))')
+endfunction
+
+function! s:wait_for_plugin_preview_output(fragment, timeout_ms) abort
+  let l:elapsed = 0
+  while l:elapsed < a:timeout_ms
+    let l:preview_buffer_number = s:plugin_preview_buffer_number()
+    let l:terminal_text = join(s:terminal_buffer_non_empty_lines(l:preview_buffer_number), "\n")
+    if stridx(l:terminal_text, a:fragment) >= 0
+      return 1
+    endif
+    sleep 10m
+    let l:elapsed += 10
+  endwhile
+
+  let l:preview_buffer_number = s:plugin_preview_buffer_number()
+  let l:terminal_text = join(s:terminal_buffer_non_empty_lines(l:preview_buffer_number), "\n")
+  return stridx(l:terminal_text, a:fragment) >= 0
 endfunction
 
 function! s:unique_id(prefix) abort
@@ -1566,10 +1646,11 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
   let l:statusline_before = s:unique_id('statusline-generate-before-')
 
   try
+    let l:progress_preset = 'dev-generate-progress'
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
-          \ {'output': 'build', 'preset': 'dev', 'build': 'Release'})
+          \ {'output': 'build', 'preset': l:progress_preset, 'build': 'Release'})
 
     let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-args-subsequent-title.txt')
     let l:seed_compile_commands_path = s:path_join(l:fixture.root, 'cmake-generate-seed-subsequent-title.json')
@@ -1605,7 +1686,8 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
     call vim_cmake_naive#generate()
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected first fake cmake generate args file to be created.')
-    let l:first_running_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake generate --preset=dev', 1000)
+    let l:first_running_buffer_name = 'cmake generate --preset=' . l:progress_preset
+    let l:first_running_buffer_number = s:wait_for_plugin_terminal_buffer_name(l:first_running_buffer_name, 1000)
     call assert_true(l:first_running_buffer_number > 0, 'Expected first running generate terminal buffer.')
     call assert_true(
           \ s:wait_for_terminal_buffer_completion(l:first_running_buffer_number, 3000),
@@ -1635,12 +1717,13 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
 
     call vim_cmake_naive#generate()
 
-    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake generate --preset=dev', 1000)
+    let l:running_buffer_name = 'cmake generate --preset=' . l:progress_preset
+    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name(l:running_buffer_name, 1000)
     call assert_true(l:running_buffer_number > 0, 'Expected running generate terminal buffer on second invocation.')
     call assert_true(
-          \ s:wait_for_global_statusline_value('cmake generate --preset=dev', 1000),
-          \ 'Expected global statusline to match running generate terminal title.')
-    call assert_true(hlexists('WarningMsg'))
+          \ s:wait_for_running_progress_message(l:running_buffer_name, 1000),
+          \ 'Expected running generate progress message with terminal title.')
+    call assert_equal(l:statusline_before, &g:statusline)
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible generate terminal window.')
     call assert_true(
           \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
@@ -2000,10 +2083,12 @@ function! s:test_cmake_build_sets_running_terminal_name_with_preset_and_target()
   let l:statusline_before = s:unique_id('statusline-build-before-')
 
   try
+    let l:progress_preset = 'dev-build-progress'
+    let l:progress_target = 'mylib-progress'
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call s:write_json(
           \ l:config_path,
-          \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'build': 'Release'})
+          \ {'output': 'build', 'preset': l:progress_preset, 'target': l:progress_target, 'build': 'Release'})
 
     let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-running-name.txt')
     let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
@@ -2025,11 +2110,13 @@ function! s:test_cmake_build_sets_running_terminal_name_with_preset_and_target()
     call vim_cmake_naive#build()
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
-    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake build --preset=dev --target=mylib', 1000)
+    let l:running_buffer_name = 'cmake build --preset=' . l:progress_preset . ' --target=' . l:progress_target
+    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name(l:running_buffer_name, 1000)
     call assert_true(l:running_buffer_number > 0, 'Expected running build terminal buffer.')
     call assert_true(
-          \ s:wait_for_global_statusline_value('cmake build --preset=dev --target=mylib', 1000),
-          \ 'Expected global statusline to match running build terminal title.')
+          \ s:wait_for_running_progress_message(l:running_buffer_name, 1000),
+          \ 'Expected running build progress message with terminal title.')
+    call assert_equal(l:statusline_before, &g:statusline)
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible build terminal window.')
     call assert_true(
           \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
@@ -2945,8 +3032,9 @@ function! s:test_cmake_test_sets_running_terminal_name_with_preset() abort
   let l:statusline_before = s:unique_id('statusline-test-before-')
 
   try
+    let l:progress_preset = 'dev-test-progress'
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev'})
+    call s:write_json(l:config_path, {'output': 'build', 'preset': l:progress_preset})
 
     let l:args_path = s:path_join(l:fixture.root, 'ctest-args-running-name-with-preset.txt')
     let l:cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-running-name-with-preset.txt')
@@ -2971,11 +3059,13 @@ function! s:test_cmake_test_sets_running_terminal_name_with_preset() abort
 
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
     call s:assert_ctest_parallel_args(s:read_non_empty_lines(l:args_path))
-    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name('ctest --preset=dev', 1000)
+    let l:running_buffer_name = 'ctest --preset=' . l:progress_preset
+    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name(l:running_buffer_name, 1000)
     call assert_true(l:running_buffer_number > 0, 'Expected running test terminal buffer.')
     call assert_true(
-          \ s:wait_for_global_statusline_value('ctest --preset=dev', 1000),
-          \ 'Expected global statusline to match running test terminal title.')
+          \ s:wait_for_running_progress_message(l:running_buffer_name, 1000),
+          \ 'Expected running test progress message with terminal title.')
+    call assert_equal(l:statusline_before, &g:statusline)
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible test terminal window.')
     call assert_true(
           \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
@@ -3223,11 +3313,13 @@ function! s:test_cmake_run_sets_running_terminal_name_with_preset_and_target() a
   let l:statusline_before = s:unique_id('statusline-run-before-')
 
   try
+    let l:progress_preset = 'dev-run-progress'
+    let l:progress_target = 'app-progress'
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'app', 'build': 'Release'})
+    call s:write_json(l:config_path, {'output': 'build', 'preset': l:progress_preset, 'target': l:progress_target, 'build': 'Release'})
 
-    let l:run_directory = s:path_join(l:fixture.root, 'build/dev')
-    let l:script_path = s:path_join(l:run_directory, 'app')
+    let l:run_directory = s:path_join(l:fixture.root, 'build/' . l:progress_preset)
+    let l:script_path = s:path_join(l:run_directory, l:progress_target)
     call mkdir(l:run_directory, 'p')
     call writefile([
           \ '#!/bin/sh',
@@ -3242,11 +3334,13 @@ function! s:test_cmake_run_sets_running_terminal_name_with_preset_and_target() a
     let &g:statusline = l:statusline_before
     call vim_cmake_naive#run()
 
-    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake run --preset=dev --target=app', 1000)
+    let l:running_buffer_name = 'cmake run --preset=' . l:progress_preset . ' --target=' . l:progress_target
+    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name(l:running_buffer_name, 1000)
     call assert_true(l:running_buffer_number > 0, 'Expected running run terminal buffer.')
     call assert_true(
-          \ s:wait_for_global_statusline_value('cmake run --preset=dev --target=app', 1000),
-          \ 'Expected global statusline to match running run terminal title.')
+          \ s:wait_for_running_progress_message(l:running_buffer_name, 1000),
+          \ 'Expected running run progress message with terminal title.')
+    call assert_equal(l:statusline_before, &g:statusline)
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible run terminal window.')
     call assert_true(
           \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
@@ -3611,6 +3705,187 @@ function! s:test_cmake_show_and_hide_preview_toggle_latest_terminal_output() abo
 
     call vim_cmake_naive#show_preview()
     call assert_true(bufwinnr(l:terminal_buffer_number) > 0, 'Expected CMakeShowPreview to reopen hidden terminal output.')
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    call vim_cmake_naive#close()
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_terminal_commands_populate_visible_preview_output_when_preview_is_open() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': '', 'target': 'app', 'build': 'Debug'})
+
+    let l:run_directory = s:path_join(l:fixture.root, 'build')
+    call mkdir(l:run_directory, 'p')
+    let l:run_script_path = s:path_join(l:run_directory, 'app')
+    let l:compile_commands_seed_path = s:path_join(l:fixture.root, 'preview-visible-compile-commands-seed.json')
+    call s:write_json(l:compile_commands_seed_path, s:fixture_entries())
+
+    let l:generate_args_path = s:path_join(l:fixture.root, 'cmake-generate-args-preview-visible.txt')
+    let l:build_args_path = s:path_join(l:fixture.root, 'cmake-build-args-preview-visible.txt')
+    let l:test_args_path = s:path_join(l:fixture.root, 'ctest-args-preview-visible.txt')
+    let l:test_cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-preview-visible.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:cmake_script_path = s:path_join(l:bin_dir, 'cmake')
+    let l:ctest_script_path = s:path_join(l:bin_dir, 'ctest')
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:build_args_path),
+          \ 'echo "preview-visible-seed-build-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:cmake_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:cmake_script_path))
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:test_args_path),
+          \ 'pwd > ' . shellescape(l:test_cwd_path),
+          \ 'echo "preview-visible-seed-test-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:ctest_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:ctest_script_path))
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'echo "preview-visible-seed-run-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:run_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:run_script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 0
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#close()
+
+    call vim_cmake_naive#build()
+    call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected seed build command to start.')
+    let l:seed_build_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake build --target=app', 1000)
+    call assert_true(l:seed_build_buffer_number > 0, 'Expected seed build terminal buffer.')
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:seed_build_buffer_number, 3000),
+          \ 'Expected seed build command to complete.')
+
+    call vim_cmake_naive#show_preview()
+    call assert_equal(1, s:plugin_preview_window_count(), 'Expected CMake preview window to be visible.')
+    call assert_true(s:plugin_preview_buffer_number() > 0, 'Expected preview window to contain a CMake terminal buffer.')
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:generate_args_path),
+          \ 'build_dir=""',
+          \ 'previous=""',
+          \ 'for argument in "$@"; do',
+          \ '  if [ "$previous" = "-B" ]; then',
+          \ '    build_dir="$argument"',
+          \ '  fi',
+          \ '  previous="$argument"',
+          \ 'done',
+          \ 'if [ -n "$build_dir" ]; then',
+          \ '  mkdir -p "$build_dir"',
+          \ '  cat ' . shellescape(l:compile_commands_seed_path) . ' > "$build_dir/compile_commands.json"',
+          \ 'fi',
+          \ 'echo "preview-visible-generate-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:cmake_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:cmake_script_path))
+
+    call vim_cmake_naive#generate()
+    call assert_true(s:wait_for_file(l:generate_args_path, 1000), 'Expected generate command arguments to be recorded.')
+    let l:generate_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake generate', 1000)
+    call assert_true(l:generate_buffer_number > 0, 'Expected running generate terminal buffer.')
+    call assert_true(
+          \ s:wait_for_plugin_preview_output('preview-visible-generate-line', 1000),
+          \ 'Expected generate output in visible preview window.')
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:generate_buffer_number, 3000),
+          \ 'Expected generate command to complete.')
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:build_args_path),
+          \ 'echo "preview-visible-build-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:cmake_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:cmake_script_path))
+
+    call vim_cmake_naive#build()
+    let l:build_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake build --target=app', 1000)
+    call assert_true(l:build_buffer_number > 0, 'Expected running build terminal buffer.')
+    call assert_true(
+          \ s:wait_for_plugin_preview_output('preview-visible-build-line', 1000),
+          \ 'Expected build output in visible preview window.')
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:build_buffer_number, 3000),
+          \ 'Expected build command to complete.')
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:test_args_path),
+          \ 'pwd > ' . shellescape(l:test_cwd_path),
+          \ 'echo "preview-visible-test-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:ctest_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:ctest_script_path))
+
+    call vim_cmake_naive#test()
+    call assert_true(s:wait_for_file(l:test_args_path, 1000), 'Expected test command arguments to be recorded.')
+    let l:test_buffer_number = s:wait_for_plugin_terminal_buffer_name('ctest', 1000)
+    call assert_true(l:test_buffer_number > 0, 'Expected running test terminal buffer.')
+    call assert_true(
+          \ s:wait_for_plugin_preview_output('preview-visible-test-line', 1000),
+          \ 'Expected test output in visible preview window.')
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:test_buffer_number, 3000),
+          \ 'Expected test command to complete.')
+
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'echo "preview-visible-run-line"',
+          \ 'sleep 1',
+          \ 'exit 0'
+          \ ], l:run_script_path, 'b')
+    call system('chmod +x ' . shellescape(l:run_script_path))
+
+    call vim_cmake_naive#run()
+    let l:run_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake run --target=app', 1000)
+    call assert_true(l:run_buffer_number > 0, 'Expected running run terminal buffer.')
+    call assert_true(
+          \ s:wait_for_plugin_preview_output('preview-visible-run-line', 1000),
+          \ 'Expected run output in visible preview window.')
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:run_buffer_number, 3000),
+          \ 'Expected run command to complete.')
+    call assert_equal(1, s:plugin_preview_window_count(), 'Expected preview window to remain visible.')
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -6105,6 +6380,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_run_reuses_build_output_window_when_possible()
   call s:test_cmake_show_preview_reports_missing_terminal_output()
   call s:test_cmake_show_and_hide_preview_toggle_latest_terminal_output()
+  call s:test_terminal_commands_populate_visible_preview_output_when_preview_is_open()
   call s:test_cmake_close_closes_generate_terminal_window()
   call s:test_cmake_close_closes_build_terminal_window()
   call s:test_cmake_info_popup_shows_config_as_table()

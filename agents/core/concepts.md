@@ -86,7 +86,10 @@ backend:
 
 By default, these commands do not open preview windows automatically. They run in
 hidden terminal buffers and report progress/start and final operation result via
-messages.
+messages (including percentage progress lines with terminal title text).
+
+If a plugin CMake preview window is already visible, these commands reuse that
+preview window and stream their new terminal output there.
 
 Use `CMakeShowPreview` to show the most recent hidden terminal output in a preview
 window, and `CMakeHidePreview` to hide preview windows without wiping those

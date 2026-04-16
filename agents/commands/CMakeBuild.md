@@ -16,13 +16,14 @@
    1. `cmake --build <dir> --parallel <N>`
    2. adds `--preset <preset>` when preset is set
    3. adds `--target <target>` when target is set
-6. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
-   preview window).
-7. While running, sets Vim status line to the terminal title for this command
-   using Vim built-in warning highlight group `WarningMsg`.
-8. Reports progress when started and final result (success/failure) via messages.
-9. Clears existing quickfix entries before command execution.
-10. On failure, parses terminal output into quickfix entries:
+6. Runs asynchronously in hidden plugin terminal buffer by default.
+7. If a plugin CMake preview window is already visible, it reuses that preview
+   window and streams build output there.
+8. While running, writes progress info messages with percentage and terminal
+   title text (for example `98% cmake build --target=all`).
+9. Reports progress when started and final result (success/failure) via messages.
+10. Clears existing quickfix entries before command execution.
+11. On failure, parses terminal output into quickfix entries:
    1. uses `g:vim_cmake_naive_make_errorformat` when set
    2. otherwise uses Vim `errorformat`
    3. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is

@@ -97,10 +97,11 @@ This command:
   - adds `--fresh` to force clean cache regeneration
   - `build` -> `-DCMAKE_BUILD_TYPE=<build>`
   - `preset` -> `--preset <preset>` (when non-empty)
-- starts generate asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
-  - `cmake generate --preset=<preset>` when preset is set
-  - `cmake generate` when preset is empty
+- starts generate asynchronously in a hidden plugin terminal buffer by default
+- when a CMake preview window is already visible, reuses it and streams generate output there
+- writes running progress info messages with percentage and command title, for example:
+  - `98% cmake generate --preset=<preset>` when preset is set
+  - `98% cmake generate` when preset is empty
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
 - extracts discovered targets and stores them to `.vim-cmake-naive-cache.json` field `targets`
 - splits root `compile_commands.json` into target-local `compile_commands.json` files under corresponding target directories
@@ -122,10 +123,11 @@ This command:
 - adds `--parallel <core_count>` to `cmake --build`
 - adds `--preset <preset>` when config `preset` is non-empty
 - adds `--target <target>` when config `target` is non-empty
-- starts build asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
-  - `cmake build --preset=<preset> --target=<target>` when preset and target are set
-  - `cmake build --target=all` when target is empty
+- starts build asynchronously in a hidden plugin terminal buffer by default
+- when a CMake preview window is already visible, reuses it and streams build output there
+- writes running progress info messages with percentage and command title, for example:
+  - `98% cmake build --preset=<preset> --target=<target>` when preset and target are set
+  - `98% cmake build --target=all` when target is empty
   - omits `--preset=...` when preset is empty
 - clears existing quickfix entries before each build run
 - when the build fails, parses terminal output into quickfix entries
@@ -149,10 +151,11 @@ This command:
   - `<output>/<preset>` when preset is non-empty
 - detects available core count (minimum `1`)
 - runs `ctest --parallel <core_count>` in that working directory
-- starts tests asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
-  - `ctest --preset=<preset>` when preset is set
-  - `ctest` when preset is empty
+- starts tests asynchronously in a hidden plugin terminal buffer by default
+- when a CMake preview window is already visible, reuses it and streams test output there
+- writes running progress info messages with percentage and command title, for example:
+  - `98% ctest --preset=<preset>` when preset is set
+  - `98% ctest` when preset is empty
 - returns immediately; start progress and completion result are reported in messages
 
 Run current target from local config:
@@ -171,10 +174,11 @@ This command:
   - `<output>/<preset>` when preset is non-empty
 - searches for an executable file matching the selected target under that run directory
 - runs the discovered executable in that run directory
-- starts execution asynchronously in a hidden plugin terminal buffer (no automatic preview window)
-- sets terminal title and Vim status line (Vim built-in warning highlight group `WarningMsg`) while running to:
-  - `cmake run --preset=<preset> --target=<target>` when preset is set
-  - `cmake run --target=<target>` when preset is empty
+- starts execution asynchronously in a hidden plugin terminal buffer by default
+- when a CMake preview window is already visible, reuses it and streams run output there
+- writes running progress info messages with percentage and command title, for example:
+  - `98% cmake run --preset=<preset> --target=<target>` when preset is set
+  - `98% cmake run --target=<target>` when preset is empty
 - returns immediately; start progress and completion result are reported in messages
 
 Show preview window with the most recent CMake terminal output:
@@ -186,6 +190,7 @@ Show preview window with the most recent CMake terminal output:
 This command:
 - opens/reuses a bottom preview window
 - shows terminal output from the most recent `:CMakeGenerate`, `:CMakeBuild`, `:CMakeTest`, or `:CMakeRun`
+- while visible, subsequent `:CMakeGenerate`, `:CMakeBuild`, `:CMakeTest`, and `:CMakeRun` commands reuse it and stream their new output there
 - reports an error when no recent CMake terminal output is available
 
 Hide visible CMake preview windows:
@@ -362,8 +367,6 @@ let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %m'
 " Optional: open quickfix window automatically for failed :CMakeBuild builds:
 let g:vim_cmake_naive_open_quickfix_on_error = 1
 
-" Optional: customize WarningMsg colors globally (affects all WarningMsg usage):
-highlight WarningMsg ctermfg=0 ctermbg=11 guifg=#000000 guibg=#ffd75f
 ```
 
 ## Notes

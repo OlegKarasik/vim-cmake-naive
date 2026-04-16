@@ -19,8 +19,9 @@
    5. requires exactly one executable match
 6. Starts asynchronous terminal command for discovered executable in run
    directory.
-7. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
-   preview window).
-8. While running, sets Vim status line to the terminal title for this command
-   using Vim built-in warning highlight group `WarningMsg`.
-9. Reports progress when started and final result (success/failure) via messages.
+7. Runs asynchronously in hidden plugin terminal buffer by default.
+8. If a plugin CMake preview window is already visible, it reuses that preview
+   window and streams run output there.
+9. While running, writes progress info messages with percentage and terminal
+   title text (for example `98% cmake run --target=<target>`).
+10. Reports progress when started and final result (success/failure) via messages.

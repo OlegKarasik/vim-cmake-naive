@@ -36,9 +36,11 @@ let s:last_cmake_terminal_buffer_number = -1
 let s:running_cmake_command_name = ''
 let s:keep_running_cmake_command_lock = 0
 let s:running_cmake_command_lock_source = ''
-let s:running_terminal_statusline_active = 0
-let s:running_terminal_statusline_previous = ''
-let s:running_terminal_statusline_command_name = ''
+let s:running_terminal_progress_active = 0
+let s:running_terminal_progress_command_name = ''
+let s:running_terminal_progress_terminal_title = ''
+let s:running_terminal_progress_percent = 0
+let s:running_terminal_progress_timer_id = -1
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
 let s:cmake_missing_preview_terminal_error =
@@ -108,38 +110,96 @@ function! s:active_running_cmake_command() abort
   return s:running_cmake_command_name
 endfunction
 
-function! s:statusline_text_for_terminal_title(title) abort
-  let l:title = substitute(s:to_string_or_empty(a:title), '%', '%%', 'g')
-  return '%#WarningMsg#' . l:title . '%*'
+function! s:running_terminal_progress_message(percent, terminal_title) abort
+  let l:percent = type(a:percent) == v:t_number
+        \ ? a:percent
+        \ : str2nr(s:to_string_or_empty(a:percent))
+  let l:percent = max([0, min([98, l:percent])])
+  let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
+  if empty(l:terminal_title)
+    return ''
+  endif
+
+  return l:percent . '% ' . l:terminal_title
 endfunction
 
-function! s:hold_running_terminal_statusline(command_name, terminal_title) abort
+function! s:write_running_terminal_progress() abort
+  if !s:running_terminal_progress_active
+    return
+  endif
+
+  let l:message = s:running_terminal_progress_message(
+        \ s:running_terminal_progress_percent,
+        \ s:running_terminal_progress_terminal_title)
+  if empty(l:message)
+    return
+  endif
+
+  call s:write_info(l:message)
+endfunction
+
+function! s:on_running_terminal_progress_tick(timer_id) abort
+  if !s:running_terminal_progress_active || s:running_terminal_progress_timer_id != a:timer_id
+    if exists('*timer_stop')
+      call timer_stop(a:timer_id)
+    endif
+    return
+  endif
+
+  if s:running_terminal_progress_percent < 98
+    let s:running_terminal_progress_percent += 1
+  endif
+  call s:write_running_terminal_progress()
+endfunction
+
+function! s:hold_running_terminal_progress(command_name, terminal_title) abort
   let l:command_name = trim(s:to_string_or_empty(a:command_name))
   let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
   if empty(l:command_name) || empty(l:terminal_title)
     return
   endif
 
-  if !s:running_terminal_statusline_active
-    let s:running_terminal_statusline_previous = &g:statusline
+  call s:release_running_terminal_progress('')
+
+  let s:running_terminal_progress_active = 1
+  let s:running_terminal_progress_command_name = l:command_name
+  let s:running_terminal_progress_terminal_title = l:terminal_title
+  let s:running_terminal_progress_percent = 1
+  let s:running_terminal_progress_timer_id = -1
+  call s:write_running_terminal_progress()
+
+  if exists('*timer_start')
+    let l:timer_id = timer_start(
+          \ 500,
+          \ function('s:on_running_terminal_progress_tick'),
+          \ {'repeat': -1})
+    if type(l:timer_id) == v:t_number && l:timer_id > 0
+      let s:running_terminal_progress_timer_id = l:timer_id
+    endif
   endif
-  let s:running_terminal_statusline_active = 1
-  let s:running_terminal_statusline_command_name = l:command_name
-  let &g:statusline = s:statusline_text_for_terminal_title(l:terminal_title)
 endfunction
 
-function! s:release_running_terminal_statusline(command_name) abort
+function! s:release_running_terminal_progress(command_name) abort
   let l:command_name = trim(s:to_string_or_empty(a:command_name))
-  if !s:running_terminal_statusline_active
-        \ || empty(l:command_name)
-        \ || s:running_terminal_statusline_command_name !=# l:command_name
+  if !s:running_terminal_progress_active
     return
   endif
 
-  let &g:statusline = s:running_terminal_statusline_previous
-  let s:running_terminal_statusline_active = 0
-  let s:running_terminal_statusline_previous = ''
-  let s:running_terminal_statusline_command_name = ''
+  if !empty(l:command_name) && s:running_terminal_progress_command_name !=# l:command_name
+    return
+  endif
+
+  if exists('*timer_stop')
+        \ && type(s:running_terminal_progress_timer_id) == v:t_number
+        \ && s:running_terminal_progress_timer_id > 0
+    call timer_stop(s:running_terminal_progress_timer_id)
+  endif
+
+  let s:running_terminal_progress_active = 0
+  let s:running_terminal_progress_command_name = ''
+  let s:running_terminal_progress_terminal_title = ''
+  let s:running_terminal_progress_percent = 0
+  let s:running_terminal_progress_timer_id = -1
 endfunction
 
 function! s:run_cmake_command(command_name, command_funcref, command_args) abort
@@ -177,7 +237,7 @@ function! s:hold_running_cmake_command_lock(command_name, ...) abort
     let s:keep_running_cmake_command_lock = 1
     let s:running_cmake_command_lock_source = l:lock_source
     if l:lock_source ==# 'terminal'
-      call s:hold_running_terminal_statusline(l:command_name, l:terminal_title)
+      call s:hold_running_terminal_progress(l:command_name, l:terminal_title)
     endif
   endif
 endfunction
@@ -189,7 +249,7 @@ function! s:release_running_cmake_command_lock(command_name) abort
   endif
 
   if s:running_cmake_command_name ==# l:command_name
-    call s:release_running_terminal_statusline(l:command_name)
+    call s:release_running_terminal_progress(l:command_name)
     let s:running_cmake_command_name = ''
     let s:running_cmake_command_lock_source = ''
   endif
@@ -2561,7 +2621,7 @@ function! s:run_generate() abort
         \ 'reuse_previous_build_window': 1,
         \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
-        \ 'open_output_window': 0,
+        \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:generate_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
@@ -2767,7 +2827,7 @@ function! s:run_build() abort
         \ 'reuse_previous_build_window': 1,
         \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
-        \ 'open_output_window': 0,
+        \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:build_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
@@ -2837,7 +2897,7 @@ function! s:run_test() abort
         \ 'reuse_previous_build_window': 1,
         \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
-        \ 'open_output_window': 0,
+        \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:test_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
@@ -2879,7 +2939,7 @@ function! s:run_run() abort
         \ 'reuse_previous_build_window': 1,
         \ 'reuse_group': 'shared',
         \ 'split_orientation': 'horizontal',
-        \ 'open_output_window': 0,
+        \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:run_terminal_name,
         \ 'success_terminal_name': 'Success',
         \ 'failure_terminal_name_prefix': 'Failure',
@@ -3372,6 +3432,10 @@ function! s:build_terminal_preview_window_ids() abort
   endfor
 
   return l:window_ids
+endfunction
+
+function! s:should_populate_visible_preview_window() abort
+  return len(s:build_terminal_preview_window_ids()) > 0
 endfunction
 
 function! s:hide_build_terminal_preview_windows() abort

@@ -12,4 +12,6 @@
    4. `CMakeRun`
 2. Opens/reuses a bottom preview window.
 3. Shows the resolved terminal buffer in that preview window.
-4. Reports an error when no recent CMake terminal output exists.
+4. While visible, subsequent `CMakeGenerate`, `CMakeBuild`, `CMakeTest`, and
+   `CMakeRun` commands reuse this preview window and stream their output there.
+5. Reports an error when no recent CMake terminal output exists.

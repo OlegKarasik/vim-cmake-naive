@@ -11,8 +11,9 @@
 4. Ensures test directory exists.
 5. Starts asynchronous terminal command in that directory:
    1. `ctest --parallel <N>`
-6. Runs asynchronously in hidden plugin terminal buffer by default (no automatic
-   preview window).
-7. While running, sets Vim status line to the terminal title for this command
-   using Vim built-in warning highlight group `WarningMsg`.
-8. Reports progress when started and final result (success/failure) via messages.
+6. Runs asynchronously in hidden plugin terminal buffer by default.
+7. If a plugin CMake preview window is already visible, it reuses that preview
+   window and streams test output there.
+8. While running, writes progress info messages with percentage and terminal
+   title text (for example `98% ctest --preset=<preset>`).
+9. Reports progress when started and final result (success/failure) via messages.
