@@ -99,9 +99,9 @@ This command:
   - `preset` -> `--preset <preset>` (when non-empty)
 - starts generate asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams generate output there
-- writes running progress info messages with percentage and command title, for example:
-  - `98% cmake generate --preset=<preset>` when preset is set
-  - `98% cmake generate` when preset is empty
+- writes running progress info messages with elapsed runtime and command title, for example:
+  - `[00:00:05] cmake generate --preset=<preset>` when preset is set
+  - `[00:00:05] cmake generate` when preset is empty
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
 - extracts discovered targets and stores them to `.vim-cmake-naive-cache.json` field `targets`
 - splits root `compile_commands.json` into target-local `compile_commands.json` files under corresponding target directories
@@ -125,9 +125,9 @@ This command:
 - adds `--target <target>` when config `target` is non-empty
 - starts build asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams build output there
-- writes running progress info messages with percentage and command title, for example:
-  - `98% cmake build --preset=<preset> --target=<target>` when preset and target are set
-  - `98% cmake build --target=all` when target is empty
+- writes running progress info messages with elapsed runtime and command title, for example:
+  - `[00:00:05] cmake build --preset=<preset> --target=<target>` when preset and target are set
+  - `[00:00:05] cmake build --target=all` when target is empty
   - omits `--preset=...` when preset is empty
 - clears existing quickfix entries before each build run
 - when the build fails, parses terminal output into quickfix entries
@@ -153,9 +153,9 @@ This command:
 - runs `ctest --parallel <core_count>` in that working directory
 - starts tests asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams test output there
-- writes running progress info messages with percentage and command title, for example:
-  - `98% ctest --preset=<preset>` when preset is set
-  - `98% ctest` when preset is empty
+- writes running progress info messages with elapsed runtime and command title, for example:
+  - `[00:00:05] ctest --preset=<preset>` when preset is set
+  - `[00:00:05] ctest` when preset is empty
 - returns immediately; start progress and completion result are reported in messages
 
 Run current target from local config:
@@ -176,9 +176,9 @@ This command:
 - runs the discovered executable in that run directory
 - starts execution asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams run output there
-- writes running progress info messages with percentage and command title, for example:
-  - `98% cmake run --preset=<preset> --target=<target>` when preset is set
-  - `98% cmake run --target=<target>` when preset is empty
+- writes running progress info messages with elapsed runtime and command title, for example:
+  - `[00:00:05] cmake run --preset=<preset> --target=<target>` when preset is set
+  - `[00:00:05] cmake run --target=<target>` when preset is empty
 - returns immediately; start progress and completion result are reported in messages
 
 Show preview window with the most recent CMake terminal output:

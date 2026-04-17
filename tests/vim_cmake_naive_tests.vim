@@ -223,7 +223,7 @@ function! s:has_running_progress_message(terminal_title) abort
 
   for l:message_line in split(execute('messages'), "\n")
     if stridx(l:message_line, l:terminal_title) < 0
-          \ || l:message_line !~# '^\[vim-cmake-naive\] [0-9]\+% '
+          \ || l:message_line !~# '^\[vim-cmake-naive\] \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] '
       continue
     endif
     return 1
@@ -1730,7 +1730,7 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
           \ 'Expected second generate command to complete.')
     call assert_equal(l:statusline_before, &g:statusline)
     let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, 'CMakeGenerate finished successfully.') >= 0)
+    call assert_match('\[vim-cmake-naive\] CMakeGenerate Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]\.', l:messages)
   finally
     sleep 100m
     let &g:statusline = l:initial_statusline
@@ -2188,7 +2188,7 @@ function! s:test_cmake_build_sets_running_terminal_name_on_subsequent_invocation
           \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
           \ 'Expected second build command to complete.')
     let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, 'CMakeBuild finished successfully.') >= 0)
+    call assert_match('\[vim-cmake-naive\] CMakeBuild Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]\.', l:messages)
   finally
     sleep 100m
     let $PATH = l:initial_path
@@ -2240,7 +2240,7 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_command_output() abo
     call assert_true(get(l:terminal, 'height', 0) <= get(l:terminal, 'max_height', 0))
     call assert_true(get(l:terminal, 'window_count', 0) >= 2)
     call assert_true(get(l:terminal, 'width', 0) > 0)
-    call assert_equal('Success', get(l:terminal, 'buffer_name', ''))
+    call assert_match('^Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]$', get(l:terminal, 'buffer_name', ''))
     let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
     call assert_true(stridx(l:terminal_text, 'preview-build-line-1') >= 0)
     call assert_true(stridx(l:terminal_text, 'preview-build-line-2') >= 0)
@@ -2304,7 +2304,7 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_ou
     call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
     call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected build preview window at the bottom.')
     call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
-    call assert_equal('Success', get(l:terminal, 'buffer_name', ''))
+    call assert_match('^Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]$', get(l:terminal, 'buffer_name', ''))
     let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
     call assert_true(stridx(l:terminal_text, 'preview-stdout-line') >= 0)
     call assert_true(stridx(l:terminal_text, 'preview-stderr-line') >= 0)
@@ -2363,7 +2363,7 @@ function! s:test_cmake_build_sets_failure_terminal_name_with_exit_code() abort
 
     let l:terminal = s:wait_for_captured_build_terminal_output('failure-build-line', 1000)
     call assert_equal(1, get(l:terminal, 'is_terminal', 0))
-    call assert_equal('Failure (7)', get(l:terminal, 'buffer_name', ''))
+    call assert_match('^Failure \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] (7)$', get(l:terminal, 'buffer_name', ''))
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
@@ -2372,7 +2372,7 @@ function! s:test_cmake_build_sets_failure_terminal_name_with_exit_code() abort
           \ s:path_join(l:expected_root, 'build'))
 
     let l:messages = execute('messages')
-    call assert_true(stridx(l:messages, 'CMakeBuild failed with exit code 7.') >= 0)
+    call assert_match('\[vim-cmake-naive\] CMakeBuild Failure \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] (exit code 7)\.', l:messages)
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -3394,7 +3394,7 @@ function! s:test_cmake_run_opens_horizontal_terminal_with_command_output() abort
     call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
     call assert_equal(l:expected_max_height, get(l:terminal, 'max_height', 0))
-    call assert_equal('Success', get(l:terminal, 'buffer_name', ''))
+    call assert_match('^Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]$', get(l:terminal, 'buffer_name', ''))
     call assert_true(s:wait_for_file(l:run_marker_path, 1000), 'Expected run preview marker file to be created.')
   finally
     if l:initial_capture_terminal is v:null

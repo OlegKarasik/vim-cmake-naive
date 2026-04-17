@@ -39,7 +39,7 @@ let s:running_cmake_command_lock_source = ''
 let s:running_terminal_progress_active = 0
 let s:running_terminal_progress_command_name = ''
 let s:running_terminal_progress_terminal_title = ''
-let s:running_terminal_progress_percent = 0
+let s:running_terminal_progress_started_at = []
 let s:running_terminal_progress_timer_id = -1
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
@@ -110,17 +110,59 @@ function! s:active_running_cmake_command() abort
   return s:running_cmake_command_name
 endfunction
 
-function! s:running_terminal_progress_message(percent, terminal_title) abort
-  let l:percent = type(a:percent) == v:t_number
-        \ ? a:percent
-        \ : str2nr(s:to_string_or_empty(a:percent))
-  let l:percent = max([0, min([98, l:percent])])
+function! s:elapsed_seconds_since(started_at) abort
+  if type(a:started_at) != v:t_list || empty(a:started_at)
+    return 0
+  endif
+
+  let l:elapsed_text = reltimestr(reltime(a:started_at))
+  let l:seconds_text = matchstr(l:elapsed_text, '^\s*\zs\d\+')
+  if empty(l:seconds_text)
+    return 0
+  endif
+
+  return str2nr(l:seconds_text)
+endfunction
+
+function! s:format_elapsed_clock(elapsed_seconds) abort
+  let l:elapsed_seconds = type(a:elapsed_seconds) == v:t_number
+        \ ? a:elapsed_seconds
+        \ : str2nr(s:to_string_or_empty(a:elapsed_seconds))
+  let l:elapsed_seconds = max([0, l:elapsed_seconds])
+  let l:hours = l:elapsed_seconds / 3600
+  let l:minutes = (l:elapsed_seconds % 3600) / 60
+  let l:seconds = l:elapsed_seconds % 60
+  return printf('%02d:%02d:%02d', l:hours, l:minutes, l:seconds)
+endfunction
+
+function! s:format_elapsed_runtime(elapsed_seconds) abort
+  return '[' . s:format_elapsed_clock(a:elapsed_seconds) . ']'
+endfunction
+
+function! s:running_terminal_progress_elapsed_seconds(...) abort
+  if !s:running_terminal_progress_active
+    return 0
+  endif
+
+  let l:command_name = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
+  if !empty(l:command_name) && s:running_terminal_progress_command_name !=# l:command_name
+    return 0
+  endif
+
+  return s:elapsed_seconds_since(s:running_terminal_progress_started_at)
+endfunction
+
+function! s:running_terminal_progress_message(elapsed_seconds, terminal_title) abort
+  let l:elapsed_seconds = type(a:elapsed_seconds) == v:t_number
+        \ ? a:elapsed_seconds
+        \ : str2nr(s:to_string_or_empty(a:elapsed_seconds))
+  let l:elapsed_seconds = max([0, l:elapsed_seconds])
   let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
   if empty(l:terminal_title)
     return ''
   endif
 
-  return l:percent . '% ' . l:terminal_title
+  return s:format_elapsed_runtime(l:elapsed_seconds) . ' ' . l:terminal_title
 endfunction
 
 function! s:write_running_terminal_progress() abort
@@ -129,7 +171,7 @@ function! s:write_running_terminal_progress() abort
   endif
 
   let l:message = s:running_terminal_progress_message(
-        \ s:running_terminal_progress_percent,
+        \ s:running_terminal_progress_elapsed_seconds(),
         \ s:running_terminal_progress_terminal_title)
   if empty(l:message)
     return
@@ -146,9 +188,6 @@ function! s:on_running_terminal_progress_tick(timer_id) abort
     return
   endif
 
-  if s:running_terminal_progress_percent < 98
-    let s:running_terminal_progress_percent += 1
-  endif
   call s:write_running_terminal_progress()
 endfunction
 
@@ -164,13 +203,13 @@ function! s:hold_running_terminal_progress(command_name, terminal_title) abort
   let s:running_terminal_progress_active = 1
   let s:running_terminal_progress_command_name = l:command_name
   let s:running_terminal_progress_terminal_title = l:terminal_title
-  let s:running_terminal_progress_percent = 1
+  let s:running_terminal_progress_started_at = reltime()
   let s:running_terminal_progress_timer_id = -1
   call s:write_running_terminal_progress()
 
   if exists('*timer_start')
     let l:timer_id = timer_start(
-          \ 500,
+          \ 1000,
           \ function('s:on_running_terminal_progress_tick'),
           \ {'repeat': -1})
     if type(l:timer_id) == v:t_number && l:timer_id > 0
@@ -198,7 +237,7 @@ function! s:release_running_terminal_progress(command_name) abort
   let s:running_terminal_progress_active = 0
   let s:running_terminal_progress_command_name = ''
   let s:running_terminal_progress_terminal_title = ''
-  let s:running_terminal_progress_percent = 0
+  let s:running_terminal_progress_started_at = []
   let s:running_terminal_progress_timer_id = -1
 endfunction
 
@@ -3572,6 +3611,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
+  let l:started_at = reltime()
   if !empty(l:working_directory)
     let l:working_directory = s:normalize_full_path(l:working_directory)
     if !isdirectory(l:working_directory)
@@ -3587,7 +3627,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_start_options.exit_cb = function(
           \ 's:on_hidden_terminal_command_exit',
-          \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name])
+          \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at])
   endif
   if !empty(l:terminal_name)
     call s:wipe_hidden_build_terminal_buffers_with_name(l:terminal_name)
@@ -3636,17 +3676,18 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   endif
 
   let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
+  let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
   call s:capture_build_terminal_for_tests(-1, l:terminal_buffer_number)
   let l:OnSuccessCallback = s:take_build_terminal_success_callback(l:terminal_buffer_number, 1)
   if l:exit_code == 0
     if s:invoke_terminal_success_callback(l:OnSuccessCallback)
-      call s:write_terminal_command_success(l:command_name)
+      call s:write_terminal_command_success(l:command_name, l:duration_seconds)
     endif
   else
     if l:populate_quickfix_on_failure
       call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
     endif
-    call s:write_terminal_command_failure(l:command_name, l:exit_code)
+    call s:write_terminal_command_failure(l:command_name, l:exit_code, l:duration_seconds)
   endif
 endfunction
 
@@ -3742,9 +3783,10 @@ function! s:take_hidden_terminal_buffer_for_job(job) abort
   return l:buffer_number
 endfunction
 
-function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, command_name, terminal_name, job, status) abort
+function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, command_name, terminal_name, started_at, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
+    let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
     let l:terminal_buffer_number = s:take_hidden_terminal_buffer_for_job(a:job)
     if l:terminal_buffer_number <= 0
       let l:fallback_buffer_number = bufnr(trim(s:to_string_or_empty(a:terminal_name)))
@@ -3761,13 +3803,13 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
     let l:OnSuccessCallback = s:take_build_terminal_success_callback(l:terminal_buffer_number, 1)
     if l:exit_code == 0
       if s:invoke_terminal_success_callback(l:OnSuccessCallback)
-        call s:write_terminal_command_success(a:command_name)
+        call s:write_terminal_command_success(a:command_name, l:duration_seconds)
       endif
     else
       if s:as_condition_bool(a:populate_quickfix_on_failure)
         call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
       endif
-      call s:write_terminal_command_failure(a:command_name, l:exit_code)
+      call s:write_terminal_command_failure(a:command_name, l:exit_code, l:duration_seconds)
     endif
   finally
     call s:release_running_cmake_command_lock(a:command_name)
@@ -4119,6 +4161,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
+  let l:started_at = reltime()
   let l:max_height = get(l:options, 'max_height', 0)
   if type(l:max_height) != v:t_number
     let l:max_height = str2nr(s:to_string_or_empty(l:max_height))
@@ -4133,7 +4176,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:populate_quickfix_on_failure, l:command_name])
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:populate_quickfix_on_failure, l:command_name, l:started_at])
   endif
 
   let l:term_start_options = copy(l:term_options)
@@ -4178,12 +4221,14 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
+    let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
     call s:set_terminal_name_for_window(
           \ a:window_id,
           \ s:terminal_completion_name(
           \   l:exit_code,
           \   l:success_terminal_name,
-          \   l:failure_terminal_name_prefix))
+          \   l:failure_terminal_name_prefix,
+          \   l:duration_seconds))
     let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
@@ -4191,13 +4236,13 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
     let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
     if l:exit_code == 0
       if s:invoke_terminal_success_callback(l:OnSuccessCallback)
-        call s:write_terminal_command_success(l:command_name)
+        call s:write_terminal_command_success(l:command_name, l:duration_seconds)
       endif
     else
       if l:populate_quickfix_on_failure
         call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
       endif
-      call s:write_terminal_command_failure(l:command_name, l:exit_code)
+      call s:write_terminal_command_failure(l:command_name, l:exit_code, l:duration_seconds)
     endif
   endif
 endfunction
@@ -4219,15 +4264,17 @@ function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) a
   call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, populate_quickfix_on_failure, command_name, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, populate_quickfix_on_failure, command_name, started_at, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
+    let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
     call s:set_terminal_name_for_window(
           \ a:window_id,
           \ s:terminal_completion_name(
           \   l:exit_code,
           \   a:success_terminal_name,
-          \   a:failure_terminal_name_prefix))
+          \   a:failure_terminal_name_prefix,
+          \   l:duration_seconds))
 
     let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
     if l:terminal_buffer_number > 0
@@ -4237,13 +4284,13 @@ function! s:on_build_terminal_command_exit(window_id, success_terminal_name, fai
     let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
     if l:exit_code == 0
       if s:invoke_terminal_success_callback(l:OnSuccessCallback)
-        call s:write_terminal_command_success(a:command_name)
+        call s:write_terminal_command_success(a:command_name, l:duration_seconds)
       endif
     else
       if s:as_condition_bool(a:populate_quickfix_on_failure)
         call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
       endif
-      call s:write_terminal_command_failure(a:command_name, l:exit_code)
+      call s:write_terminal_command_failure(a:command_name, l:exit_code, l:duration_seconds)
     endif
   finally
     call s:release_running_cmake_command_lock(a:command_name)
@@ -4310,22 +4357,32 @@ function! s:terminal_command_display_name(command_name) abort
   return empty(l:command_name) ? 'Command' : l:command_name
 endfunction
 
-function! s:write_terminal_command_success(command_name) abort
-  call s:write_info(s:terminal_command_display_name(a:command_name) . ' finished successfully.')
-endfunction
-
-function! s:write_terminal_command_failure(command_name, exit_code) abort
-  call s:write_error(
+function! s:write_terminal_command_success(command_name, elapsed_seconds) abort
+  call s:write_info(
         \ s:terminal_command_display_name(a:command_name)
-        \ . ' failed with exit code '
-        \ . a:exit_code
+        \ . ' Success '
+        \ . s:format_elapsed_runtime(a:elapsed_seconds)
         \ . '.')
 endfunction
 
-function! s:terminal_completion_name(exit_code, success_terminal_name, failure_terminal_name_prefix) abort
+function! s:write_terminal_command_failure(command_name, exit_code, elapsed_seconds) abort
+  call s:write_error(
+        \ s:terminal_command_display_name(a:command_name)
+        \ . ' Failure '
+        \ . s:format_elapsed_runtime(a:elapsed_seconds)
+        \ . ' (exit code '
+        \ . a:exit_code
+        \ . ').')
+endfunction
+
+function! s:terminal_completion_name(exit_code, success_terminal_name, failure_terminal_name_prefix, elapsed_seconds) abort
   let l:success_terminal_name = trim(s:to_string_or_empty(a:success_terminal_name))
   if a:exit_code == 0
-    return l:success_terminal_name
+    if empty(l:success_terminal_name)
+      return ''
+    endif
+
+    return l:success_terminal_name . ' ' . s:format_elapsed_runtime(a:elapsed_seconds)
   endif
 
   let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(a:failure_terminal_name_prefix))
@@ -4333,7 +4390,12 @@ function! s:terminal_completion_name(exit_code, success_terminal_name, failure_t
     return ''
   endif
 
-  return l:failure_terminal_name_prefix . ' (' . a:exit_code . ')'
+  return l:failure_terminal_name_prefix
+        \ . ' '
+        \ . s:format_elapsed_runtime(a:elapsed_seconds)
+        \ . ' ('
+        \ . a:exit_code
+        \ . ')'
 endfunction
 
 function! s:terminal_buffer_number_for_window(window_id) abort
