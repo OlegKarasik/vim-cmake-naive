@@ -183,7 +183,7 @@ function! s:set_global_statusline(message, highlight_group) abort
   if empty(l:highlight_group)
     let &g:statusline = l:message
   else
-    let &g:statusline = '%#' . l:highlight_group . '#' . l:message . '%*'
+    let &g:statusline = '%#' . l:highlight_group . '#' . l:message . '%=%*'
   endif
 
   silent! redrawstatus

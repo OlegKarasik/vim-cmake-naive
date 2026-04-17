@@ -225,6 +225,7 @@ function! s:has_running_progress_message(terminal_title) abort
   return stridx(l:statusline, '%#WarningMsg#') >= 0
         \ && stridx(l:statusline, l:terminal_title) >= 0
         \ && l:statusline =~# '\[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]'
+        \ && stridx(l:statusline, '%=%*') >= 0
 endfunction
 
 function! s:wait_for_running_progress_message(terminal_title, timeout_ms) abort

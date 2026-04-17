@@ -99,7 +99,7 @@ This command:
   - `preset` -> `--preset <preset>` (when non-empty)
 - starts generate asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams generate output there
-- updates global statusline immediately while generate is running, using warning highlight:
+- updates global statusline immediately while generate is running, using warning highlight across full statusline width:
   - `cmake generate --preset=<preset> [00:00:05]` when preset is set
   - `cmake generate [00:00:05]` when preset is empty
 - on completion, restores global statusline to its pre-command value
@@ -129,7 +129,7 @@ This command:
 - adds `--target <target>` when config `target` is non-empty
 - starts build asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams build output there
-- updates global statusline immediately while build is running, using warning highlight:
+- updates global statusline immediately while build is running, using warning highlight across full statusline width:
   - `cmake build --preset=<preset> --target=<target> [00:00:05]` when preset and target are set
   - `cmake build --target=all [00:00:05]` when target is empty
   - omits `--preset=...` when preset is empty
@@ -161,7 +161,7 @@ This command:
 - runs `ctest --parallel <core_count>` in that working directory
 - starts tests asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams test output there
-- updates global statusline immediately while test is running, using warning highlight:
+- updates global statusline immediately while test is running, using warning highlight across full statusline width:
   - `ctest --preset=<preset> [00:00:05]` when preset is set
   - `ctest [00:00:05]` when preset is empty
 - on completion, restores global statusline to its pre-command value
@@ -188,7 +188,7 @@ This command:
 - runs the discovered executable in that run directory
 - starts execution asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams run output there
-- updates global statusline immediately while run is in progress, using warning highlight:
+- updates global statusline immediately while run is in progress, using warning highlight across full statusline width:
   - `cmake run --preset=<preset> --target=<target> [00:00:05]` when preset is set
   - `cmake run --target=<target> [00:00:05]` when preset is empty
 - on completion, restores global statusline to its pre-command value
