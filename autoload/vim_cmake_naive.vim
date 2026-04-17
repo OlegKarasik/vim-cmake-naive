@@ -43,6 +43,8 @@ let s:running_terminal_progress_started_at = []
 let s:running_terminal_progress_timer_id = -1
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
+let s:cmake_missing_project_root_error =
+      \ 'CMakeLists.txt not found in current directory or any parent directory.'
 let s:cmake_missing_preview_terminal_error =
       \ 'No recent CMake terminal output found. Please run CMakeGenerate, CMakeBuild, CMakeRun, or CMakeTest first.'
 let s:cmake_menu_prompt = 'Select command'
@@ -480,7 +482,7 @@ function! vim_cmake_naive#sync_startup_integration_files() abort
   catch
     let l:message = s:format_exception(v:exception)
     if stridx(l:message, s:cmake_missing_local_config_error) >= 0
-          \ || stridx(l:message, 'CMakeLists.txt not found in current directory or any parent directory.') >= 0
+          \ || stridx(l:message, s:cmake_missing_project_root_error) >= 0
       return
     endif
     call s:write_error(l:message)
@@ -521,13 +523,14 @@ function! s:run_info() abort
   let l:title = 'CMake info'
 
   try
-    let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-    let l:config_path = s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+    let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+    let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+    let l:config_path = s:resolve_existing_local_config_path(l:project_start_directory, l:project_root)
     let l:config = s:read_json_object(l:config_path)
   catch
     let l:message = s:format_exception(v:exception)
     if stridx(l:message, s:cmake_missing_local_config_error) < 0
-          \ && stridx(l:message, 'CMakeLists.txt not found in current directory or any parent directory.') < 0
+          \ && stridx(l:message, s:cmake_missing_project_root_error) < 0
       throw l:message
     endif
     let l:config_exists = 0
@@ -821,14 +824,15 @@ endfunction
 
 function! s:run_sync_startup_integration_files() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_existing_local_config_path(l:project_start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
   call s:update_local_integration_files(l:config_path, l:config)
 endfunction
 
 function! s:run_cmake_config() abort
-  let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(getcwd())
   let l:config_path = s:cmake_config_path(l:project_root)
   let l:config_directory = fnamemodify(l:config_path, ':h')
 
@@ -871,9 +875,10 @@ endfunction
 
 function! s:run_switch_preset() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(getcwd())
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
   let l:selection_prompt = 'Select preset'
-  let l:current_preset = s:current_config_preset_for_switch(l:working_directory, l:project_root)
+  let l:current_preset = s:current_config_preset_for_switch(l:project_start_directory, l:project_root)
   if empty(l:current_preset)
     let l:current_preset = s:cmake_switch_preset_none_name
   endif
@@ -908,9 +913,10 @@ endfunction
 
 function! s:run_switch_build() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(getcwd())
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
   let l:selection_prompt = 'Select build'
-  let l:current_build = s:current_config_build_for_switch(l:working_directory, l:project_root)
+  let l:current_build = s:current_config_build_for_switch(l:project_start_directory, l:project_root)
   let l:available_builds = copy(s:cmake_switch_build_default_types)
   call insert(l:available_builds, s:cmake_switch_build_none_name)
   if empty(l:current_build)
@@ -1645,8 +1651,9 @@ endfunction
 
 function! s:run_switch_target() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(getcwd())
-  let l:config_path = s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(getcwd())
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_existing_local_config_path(l:project_start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
   let l:selection_prompt = 'Select target'
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
@@ -2594,7 +2601,7 @@ function! s:inputlist_selection(prompt, items) abort
 endfunction
 
 function! s:run_cmake_config_default() abort
-  let l:project_root = s:resolve_cmake_project_root(getcwd())
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(getcwd())
   let l:config_path = s:cmake_config_path(l:project_root)
   let l:config = filereadable(l:config_path)
         \ ? s:read_json_object(l:config_path)
@@ -2611,8 +2618,9 @@ endfunction
 
 function! s:run_generate() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:project_start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
 
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
@@ -2853,8 +2861,9 @@ endfunction
 
 function! s:run_build() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:project_start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
 
   let l:build_context = s:build_context_from_config(l:config_path, l:config)
@@ -2914,8 +2923,9 @@ endfunction
 
 function! s:run_test() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:project_start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
 
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
@@ -2948,8 +2958,9 @@ endfunction
 
 function! s:run_run() abort
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
-  let l:config_path = s:resolve_or_create_local_config_for_generate(l:working_directory, l:project_root)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_or_create_local_config_for_generate(l:project_start_directory, l:project_root)
   let l:config = s:read_json_object(l:config_path)
 
   let l:output_value = s:to_string_or_empty(get(l:config, s:cmake_config_output_key, s:cmake_config_default_output))
@@ -3228,7 +3239,74 @@ function! s:resolve_cmake_project_root(start_directory) abort
     let l:current = l:parent
   endwhile
 
-  throw 'CMakeLists.txt not found in current directory or any parent directory.'
+  throw s:cmake_missing_project_root_error
+endfunction
+
+function! s:current_buffer_file_search_directory() abort
+  let l:buffer_number = bufnr('')
+  if l:buffer_number <= 0 || !bufexists(l:buffer_number)
+    return ''
+  endif
+
+  if getbufvar(l:buffer_number, '&buftype', '') !=# ''
+    return ''
+  endif
+
+  let l:buffer_path = trim(s:to_string_or_empty(bufname(l:buffer_number)))
+  if empty(l:buffer_path)
+    return ''
+  endif
+
+  let l:buffer_path = s:normalize_full_path(l:buffer_path)
+  let l:buffer_directory = s:normalize_full_path(fnamemodify(l:buffer_path, ':h'))
+  if !isdirectory(l:buffer_directory)
+    return ''
+  endif
+
+  return l:buffer_directory
+endfunction
+
+function! s:resolve_cmake_project_root_with_file_fallback(start_directory) abort
+  let l:start_directory = s:normalize_full_path(a:start_directory)
+
+  try
+    return s:resolve_cmake_project_root(l:start_directory)
+  catch
+    let l:message = s:format_exception(v:exception)
+    if stridx(l:message, s:cmake_missing_project_root_error) < 0
+      throw l:message
+    endif
+  endtry
+
+  let l:file_directory = s:current_buffer_file_search_directory()
+  if empty(l:file_directory) || s:path_equals(l:file_directory, l:start_directory)
+    throw s:cmake_missing_project_root_error
+  endif
+
+  try
+    return s:resolve_cmake_project_root(l:file_directory)
+  catch
+    let l:message = s:format_exception(v:exception)
+    if stridx(l:message, s:cmake_missing_project_root_error) >= 0
+      throw s:cmake_missing_project_root_error
+    endif
+    throw l:message
+  endtry
+endfunction
+
+function! s:project_search_start_directory(start_directory, project_root) abort
+  let l:start_directory = s:normalize_full_path(a:start_directory)
+  let l:project_root = s:normalize_full_path(a:project_root)
+  if s:is_sub_path_of(l:start_directory, l:project_root)
+    return l:start_directory
+  endif
+
+  let l:file_directory = s:current_buffer_file_search_directory()
+  if !empty(l:file_directory) && s:is_sub_path_of(l:file_directory, l:project_root)
+    return l:file_directory
+  endif
+
+  return l:start_directory
 endfunction
 
 function! s:resolve_existing_local_config_path(start_directory, ...) abort
@@ -3290,9 +3368,10 @@ endfunction
 function! s:set_config_value(key, value, ...) abort
   let l:require_existing = get(a:000, 0, 0)
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
   let l:config_path = l:require_existing
-        \ ? s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+        \ ? s:resolve_existing_local_config_path(l:project_start_directory, l:project_root)
         \ : s:cmake_config_path(l:project_root)
   let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:config = filereadable(l:config_path)
@@ -3310,9 +3389,10 @@ endfunction
 function! s:remove_config_value(key, ...) abort
   let l:require_existing = get(a:000, 0, 0)
   let l:working_directory = s:normalize_full_path(getcwd())
-  let l:project_root = s:resolve_cmake_project_root(l:working_directory)
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
   let l:config_path = l:require_existing
-        \ ? s:resolve_existing_local_config_path(l:working_directory, l:project_root)
+        \ ? s:resolve_existing_local_config_path(l:project_start_directory, l:project_root)
         \ : s:cmake_config_path(l:project_root)
   let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
   let l:config = filereadable(l:config_path)

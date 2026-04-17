@@ -269,7 +269,7 @@ Switch local CMake preset from `CMakePresets.json`:
 ```
 
 This command:
-- finds nearest `CMakeLists.txt` from current directory upward
+- finds nearest `CMakeLists.txt` from current directory upward; if none is found, retries from the current file path upward
 - reads `CMakePresets.json` at that project root
 - always includes predefined preset `(none)`
 - lists selectable configure presets (non-hidden, condition evaluates to true) in sorted order
@@ -372,6 +372,7 @@ let g:vim_cmake_naive_open_quickfix_on_error = 1
 ## Notes
 
 - Errors are reported through Vim messages with a `[vim-cmake-naive]` prefix.
+- Project root detection starts from current directory upward; if no root is found and current buffer has a file path, it retries from that file path.
 - Integration files are maintained at project root:
   - `.vim-cmake-naive-target`: currently selected target name (empty when unset)
   - `.vim-cmake-naive-output`: current build directory path relative to root

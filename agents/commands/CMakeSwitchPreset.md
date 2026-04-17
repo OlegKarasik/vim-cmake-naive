@@ -6,7 +6,8 @@
 **Conflicts:** none.
 
 1. Requires local configuration to exist.
-2. Resolves Root Directory, then reads `CMakePresets.json`.
+2. Resolves Root Directory (current working directory first, then current file
+   path as fallback), then reads `CMakePresets.json`.
 3. Resolves Local Configuration.
 4. Builds selectable preset list from `configurePresets`:
    1. skips hidden presets
@@ -19,4 +20,3 @@
 7. On selection:
    1. `(none)` removes `preset`
    2. any preset name sets `preset` and removes `build`
-

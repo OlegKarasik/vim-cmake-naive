@@ -7,9 +7,10 @@
 
 ## Root Directory
 
-The nearest ancestor directory (from current working directory upward) that
-contains `CMakeLists.txt`. Many commands fail immediately if this directory cannot
-be found.
+The nearest ancestor directory that contains `CMakeLists.txt`. Resolution starts
+from current working directory upward; if no root is found and current buffer
+has a file path, resolution retries from that file path upward. Many commands
+fail immediately if this directory cannot be found.
 
 ## Local Configuration
 

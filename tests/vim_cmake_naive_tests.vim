@@ -4610,6 +4610,54 @@ function! s:test_cmake_switch_preset_reports_missing_presets_file() abort
   endtry
 endfunction
 
+function! s:test_cmake_switch_preset_falls_back_to_current_file_path_when_cwd_has_no_root() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:outside_root = tempname()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
+
+  call mkdir(l:outside_root, 'p')
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'preset': 'old', 'build': 'RelWithDebInfo', 'keep': 1})
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [{'name': 'dev'}])
+
+    let l:source_directory = s:path_join(l:fixture.root, 'src')
+    let l:source_path = s:path_join(l:source_directory, 'main.cpp')
+    call mkdir(l:source_directory, 'p')
+    call writefile(['int main() { return 0; }'], l:source_path, 'b')
+
+    execute 'silent keepalt edit ' . fnameescape(l:source_path)
+    execute 'cd ' . fnameescape(l:outside_root)
+    let g:vim_cmake_naive_test_menu_response = 2
+    let g:vim_cmake_naive_test_inputlist_response = 2
+    call vim_cmake_naive#switch_preset()
+
+    call assert_equal(
+          \ {'preset': 'dev', 'keep': 1},
+          \ s:read_json(l:config_path))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
+    endif
+    execute 'silent keepalt enew'
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+    call delete(l:outside_root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_switch_preset_reports_missing_local_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -6395,6 +6443,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_preset_sets_selected_visible_preset()
   call s:test_cmake_switch_preset_selects_none_and_removes_preset_key()
   call s:test_cmake_switch_preset_reports_missing_presets_file()
+  call s:test_cmake_switch_preset_falls_back_to_current_file_path_when_cwd_has_no_root()
   call s:test_cmake_switch_preset_reports_missing_local_config()
   call s:test_cmake_switch_preset_cancels_without_changing_config()
   call s:test_cmake_switch_preset_only_none_is_selectable_when_no_visible_presets()
