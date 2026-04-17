@@ -99,13 +99,17 @@ This command:
   - `preset` -> `--preset <preset>` (when non-empty)
 - starts generate asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams generate output there
-- writes running progress info messages with elapsed runtime and command title, for example:
-  - `[00:00:05] cmake generate --preset=<preset>` when preset is set
-  - `[00:00:05] cmake generate` when preset is empty
+- updates global statusline immediately while generate is running, using warning highlight:
+  - `cmake generate --preset=<preset> [00:00:05]` when preset is set
+  - `cmake generate [00:00:05]` when preset is empty
+- on completion, restores global statusline to its pre-command value
+- reports completion in Vim messages:
+  - success (`DiffAdd`): `<terminal-title> [00:00:05] [Success]`
+  - error (`ErrorMsg`): `<terminal-title> [00:00:05] [Error] (exit code <N>)`
 - after successful generate completion, scans root `compile_commands.json` from the active build directory
 - extracts discovered targets and stores them to `.vim-cmake-naive-cache.json` field `targets`
 - splits root `compile_commands.json` into target-local `compile_commands.json` files under corresponding target directories
-- returns immediately; start progress and completion result are reported in messages
+- returns immediately; command runs asynchronously and completion is reported via messages
 
 Build project with CMake from local config:
 
@@ -125,16 +129,20 @@ This command:
 - adds `--target <target>` when config `target` is non-empty
 - starts build asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams build output there
-- writes running progress info messages with elapsed runtime and command title, for example:
-  - `[00:00:05] cmake build --preset=<preset> --target=<target>` when preset and target are set
-  - `[00:00:05] cmake build --target=all` when target is empty
+- updates global statusline immediately while build is running, using warning highlight:
+  - `cmake build --preset=<preset> --target=<target> [00:00:05]` when preset and target are set
+  - `cmake build --target=all [00:00:05]` when target is empty
   - omits `--preset=...` when preset is empty
+- on completion, restores global statusline to its pre-command value
+- reports completion in Vim messages:
+  - success (`DiffAdd`): `<terminal-title> [00:00:05] [Success]`
+  - error (`ErrorMsg`): `<terminal-title> [00:00:05] [Error] (exit code <N>)`
 - clears existing quickfix entries before each build run
 - when the build fails, parses terminal output into quickfix entries
   - uses `g:vim_cmake_naive_make_errorformat` when set
   - otherwise uses Vim `errorformat`
 - when `g:vim_cmake_naive_open_quickfix_on_error = 1`, opens quickfix automatically for failed builds with parsed entries
-- returns immediately; start progress and completion result are reported in messages
+- returns immediately; command runs asynchronously and completion is reported via messages
 
 Run tests with CTest from local config:
 
@@ -153,10 +161,14 @@ This command:
 - runs `ctest --parallel <core_count>` in that working directory
 - starts tests asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams test output there
-- writes running progress info messages with elapsed runtime and command title, for example:
-  - `[00:00:05] ctest --preset=<preset>` when preset is set
-  - `[00:00:05] ctest` when preset is empty
-- returns immediately; start progress and completion result are reported in messages
+- updates global statusline immediately while test is running, using warning highlight:
+  - `ctest --preset=<preset> [00:00:05]` when preset is set
+  - `ctest [00:00:05]` when preset is empty
+- on completion, restores global statusline to its pre-command value
+- reports completion in Vim messages:
+  - success (`DiffAdd`): `<terminal-title> [00:00:05] [Success]`
+  - error (`ErrorMsg`): `<terminal-title> [00:00:05] [Error] (exit code <N>)`
+- returns immediately; command runs asynchronously and completion is reported via messages
 
 Run current target from local config:
 
@@ -176,10 +188,14 @@ This command:
 - runs the discovered executable in that run directory
 - starts execution asynchronously in a hidden plugin terminal buffer by default
 - when a CMake preview window is already visible, reuses it and streams run output there
-- writes running progress info messages with elapsed runtime and command title, for example:
-  - `[00:00:05] cmake run --preset=<preset> --target=<target>` when preset is set
-  - `[00:00:05] cmake run --target=<target>` when preset is empty
-- returns immediately; start progress and completion result are reported in messages
+- updates global statusline immediately while run is in progress, using warning highlight:
+  - `cmake run --preset=<preset> --target=<target> [00:00:05]` when preset is set
+  - `cmake run --target=<target> [00:00:05]` when preset is empty
+- on completion, restores global statusline to its pre-command value
+- reports completion in Vim messages:
+  - success (`DiffAdd`): `<terminal-title> [00:00:05] [Success]`
+  - error (`ErrorMsg`): `<terminal-title> [00:00:05] [Error] (exit code <N>)`
+- returns immediately; command runs asynchronously and completion is reported via messages
 
 Show preview window with the most recent CMake terminal output:
 

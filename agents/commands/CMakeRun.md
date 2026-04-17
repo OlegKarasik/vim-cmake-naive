@@ -22,6 +22,9 @@
 7. Runs asynchronously in hidden plugin terminal buffer by default.
 8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams run output there.
-9. While running, writes progress info messages with percentage and terminal
-   title text (for example `98% cmake run --target=<target>`).
-10. Reports progress when started and final result (success/failure) via messages.
+9. While running, updates global statusline immediately with warning highlight
+   and terminal title plus elapsed runtime
+   (for example `cmake run --target=<target> [00:00:05]`).
+10. On completion, restores global statusline to its pre-command value and writes
+    Vim message with terminal title, runtime, and `[Success]` or `[Error]`
+    suffix.

@@ -15,10 +15,12 @@
 6. Runs in hidden plugin terminal buffer by default.
 7. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams generate output there.
-8. While running, writes progress info messages with percentage and terminal
-   title text (for example `98% cmake generate --preset=<preset>`).
-9. Reports progress when started and reports final result (success/failure) via
-   messages.
+8. While running, updates global statusline immediately with warning highlight
+   and terminal title plus elapsed runtime
+   (for example `cmake generate --preset=<preset> [00:00:05]`).
+9. On completion, restores global statusline to its pre-command value and writes
+   Vim message with terminal title, runtime, and `[Success]` or `[Error]`
+   suffix.
 10. On successful completion:
    1. reads root `compile_commands.json` from scan directory
    2. discovers available targets

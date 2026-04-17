@@ -86,8 +86,10 @@ backend:
 4. `CMakeGenerate`
 
 By default, these commands do not open preview windows automatically. They run in
-hidden terminal buffers and report progress/start and final operation result via
-messages (including percentage progress lines with terminal title text).
+hidden terminal buffers and update global statusline with terminal title and
+elapsed runtime while running. On completion, statusline is restored to its
+pre-command value, and completion is reported in Vim messages with `[Success]`
+or `[Error]` suffix.
 
 If a plugin CMake preview window is already visible, these commands reuse that
 preview window and stream their new terminal output there.
