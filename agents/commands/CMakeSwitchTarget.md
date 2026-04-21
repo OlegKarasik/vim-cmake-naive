@@ -23,5 +23,5 @@
       2. copies that target-local `compile_commands.json` to
          `<output>/compile_commands.json`
       3. sets `target` key in config
-9. Updates integration state files through config writes.
-
+9. Updates local `.vimspector` integration variable values through config
+   writes when those variable definitions already exist.

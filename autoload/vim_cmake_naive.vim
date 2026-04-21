@@ -3,8 +3,9 @@ let s:default_output_filename = 'compile_commands.json'
 let s:cmake_config_filename = '.vim-cmake-naive-config.json'
 let s:cmake_presets_filename = 'CMakePresets.json'
 let s:cmake_cache_filename = '.vim-cmake-naive-cache.json'
-let s:cmake_target_state_filename = '.vim-cmake-naive-target'
-let s:cmake_output_state_filename = '.vim-cmake-naive-output'
+let s:vimspector_filename = '.vimspector'
+let s:vimspector_target_variable_key = 'VIM_NAIVE_CMAKE_TARGET'
+let s:vimspector_output_variable_key = 'VIM_NAIVE_CMAKE_OUTPUT'
 let s:cmake_config_preset_key = 'preset'
 let s:cmake_config_build_config_key = 'build'
 let s:cmake_config_output_key = 'output'
@@ -4763,20 +4764,12 @@ function! s:cmake_presets_path(project_root) abort
   return s:path_join(a:project_root, s:cmake_presets_filename)
 endfunction
 
-function! s:cmake_target_state_path(config_path) abort
+function! s:vimspector_path(config_path) abort
   if empty(trim(a:config_path))
     throw 'Config path cannot be empty.'
   endif
 
-  return s:path_join(fnamemodify(a:config_path, ':h'), s:cmake_target_state_filename)
-endfunction
-
-function! s:cmake_output_state_path(config_path) abort
-  if empty(trim(a:config_path))
-    throw 'Config path cannot be empty.'
-  endif
-
-  return s:path_join(fnamemodify(a:config_path, ':h'), s:cmake_output_state_filename)
+  return s:path_join(fnamemodify(a:config_path, ':h'), s:vimspector_filename)
 endfunction
 
 function! s:integration_target_value(config) abort
@@ -4818,13 +4811,28 @@ function! s:update_local_integration_files(config_path, config) abort
     throw 'Config payload must be a JSON object.'
   endif
 
-  let l:target_path = s:cmake_target_state_path(a:config_path)
-  let l:output_path = s:cmake_output_state_path(a:config_path)
-  let l:target_value = s:integration_target_value(a:config)
-  let l:output_value = s:integration_build_directory_relative_path(a:config_path, a:config)
-  call mkdir(fnamemodify(l:target_path, ':h'), 'p')
-  call writefile([l:target_value], l:target_path, 'b')
-  call writefile([l:output_value], l:output_path, 'b')
+  let l:vimspector_path = s:vimspector_path(a:config_path)
+  if filereadable(l:vimspector_path)
+    let l:vimspector_payload = s:read_json_object(l:vimspector_path)
+    let l:variables = get(l:vimspector_payload, 'variables', v:null)
+    if type(l:variables) == v:t_dict
+      let l:updated = 0
+      if has_key(l:variables, s:vimspector_target_variable_key)
+        let l:variables[s:vimspector_target_variable_key] = s:integration_target_value(a:config)
+        let l:updated = 1
+      endif
+      if has_key(l:variables, s:vimspector_output_variable_key)
+        let l:variables[s:vimspector_output_variable_key] = s:integration_build_directory_relative_path(a:config_path, a:config)
+        let l:updated = 1
+      endif
+
+      if l:updated
+        let l:vimspector_payload.variables = l:variables
+        call s:write_json_file(l:vimspector_path, l:vimspector_payload)
+      endif
+    endif
+  endif
+
   call s:sync_makeprg_from_local_config(a:config_path, a:config)
 endfunction
 

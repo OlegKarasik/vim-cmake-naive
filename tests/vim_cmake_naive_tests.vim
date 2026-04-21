@@ -759,7 +759,7 @@ function! s:test_plugin_does_not_register_cmake_make_command() abort
   call assert_equal(0, exists(':CMakeMake'))
 endfunction
 
-function! s:test_plugin_startup_syncs_integration_files_from_local_config() abort
+function! s:test_plugin_startup_syncs_vimspector_variables_from_local_config() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:plugin_path = get(globpath(&runtimepath, 'plugin/vim_cmake_naive.vim', 1, 1), 0, '')
@@ -769,20 +769,54 @@ function! s:test_plugin_startup_syncs_integration_files_from_local_config() abor
   try
     call assert_true(!empty(l:plugin_path), 'Expected plugin/vim_cmake_naive.vim to exist in runtimepath.')
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:target_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-target')
-    let l:output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
     call s:write_json(l:config_path, {'output': 'out/build', 'preset': 'dev', 'target': 'my_target'})
-    call delete(l:target_state_path)
-    call delete(l:output_state_path)
+    call s:write_json(l:vimspector_path, {
+          \ 'variables': {
+          \   'VIM_NAIVE_CMAKE_TARGET': 'old-target',
+          \   'VIM_NAIVE_CMAKE_OUTPUT': 'old-output',
+          \   'KEEP_ME': 'keep'
+          \ }
+          \ })
 
     execute 'cd ' . fnameescape(l:fixture.root)
     unlet! g:loaded_vim_cmake_naive
     execute 'source ' . fnameescape(l:plugin_path)
 
-    call assert_true(filereadable(l:target_state_path), 'Expected .vim-cmake-naive-target to be created during startup.')
-    call assert_true(filereadable(l:output_state_path), 'Expected .vim-cmake-naive-output to be created during startup.')
-    call assert_equal(['my_target'], readfile(l:target_state_path, 'b'))
-    call assert_equal(['out/build/dev'], readfile(l:output_state_path, 'b'))
+    let l:variables = get(s:read_json(l:vimspector_path), 'variables', {})
+    call assert_equal('my_target', get(l:variables, 'VIM_NAIVE_CMAKE_TARGET', ''))
+    call assert_equal('out/build/dev', get(l:variables, 'VIM_NAIVE_CMAKE_OUTPUT', ''))
+    call assert_equal('keep', get(l:variables, 'KEEP_ME', ''))
+  finally
+    if l:initial_loaded_plugin is v:null
+      unlet! g:loaded_vim_cmake_naive
+    else
+      let g:loaded_vim_cmake_naive = l:initial_loaded_plugin
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_plugin_startup_does_not_create_vimspector_when_missing() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:plugin_path = get(globpath(&runtimepath, 'plugin/vim_cmake_naive.vim', 1, 1), 0, '')
+  let l:plugin_path = fnamemodify(l:plugin_path, ':p')
+  let l:initial_loaded_plugin = get(g:, 'loaded_vim_cmake_naive', v:null)
+
+  try
+    call assert_true(!empty(l:plugin_path), 'Expected plugin/vim_cmake_naive.vim to exist in runtimepath.')
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    call s:write_json(l:config_path, {'output': 'out/build', 'preset': 'dev', 'target': 'my_target'})
+    call delete(l:vimspector_path)
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:loaded_vim_cmake_naive
+    execute 'source ' . fnameescape(l:plugin_path)
+
+    call assert_false(filereadable(l:vimspector_path), 'Expected missing .vimspector to remain missing during startup sync.')
   finally
     if l:initial_loaded_plugin is v:null
       unlet! g:loaded_vim_cmake_naive
@@ -971,11 +1005,10 @@ function! s:test_cmake_set_config_output_creates_config_with_value() abort
     execute 'silent CMakeConfigSetOutput build'
 
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
     call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'output': 'build'}, s:read_json(l:config_path))
-    call assert_true(filereadable(l:output_state_path), 'Expected .vim-cmake-naive-output to be created.')
-    call assert_equal(['build'], readfile(l:output_state_path, 'b'))
+    call assert_false(filereadable(l:vimspector_path), 'Expected missing .vimspector to remain missing.')
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -988,8 +1021,15 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
+    call s:write_json(l:vimspector_path, {
+          \ 'variables': {
+          \   'VIM_NAIVE_CMAKE_TARGET': 'legacy-target',
+          \   'VIM_NAIVE_CMAKE_OUTPUT': 'legacy-output',
+          \   'KEEP_ME': 'keep'
+          \ }
+          \ })
 
     execute 'cd ' . fnameescape(l:fixture.root)
     call vim_cmake_naive#set_config_output('out/build')
@@ -997,8 +1037,37 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
     call assert_equal(
           \ {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'out/build'},
           \ s:read_json(l:config_path))
-    call assert_true(filereadable(l:output_state_path), 'Expected .vim-cmake-naive-output to be created.')
-    call assert_equal(['out/build/debug'], readfile(l:output_state_path, 'b'))
+    let l:variables = get(s:read_json(l:vimspector_path), 'variables', {})
+    call assert_equal('', get(l:variables, 'VIM_NAIVE_CMAKE_TARGET', 'MISSING'))
+    call assert_equal('out/build/debug', get(l:variables, 'VIM_NAIVE_CMAKE_OUTPUT', ''))
+    call assert_equal('keep', get(l:variables, 'KEEP_ME', ''))
+  finally
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_set_config_output_does_not_add_missing_vimspector_variables() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
+    call s:write_json(l:vimspector_path, {
+          \ 'variables': {
+          \   'UNRELATED': 'keep'
+          \ }
+          \ })
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#set_config_output('out/build')
+
+    let l:variables = get(s:read_json(l:vimspector_path), 'variables', {})
+    call assert_equal('keep', get(l:variables, 'UNRELATED', ''))
+    call assert_false(has_key(l:variables, 'VIM_NAIVE_CMAKE_TARGET'))
+    call assert_false(has_key(l:variables, 'VIM_NAIVE_CMAKE_OUTPUT'))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -1060,6 +1129,20 @@ function! s:test_cmake_set_commands_use_nearest_existing_local_config() abort
 
     let l:deep_dir = s:path_join(s:path_join(l:fixture.root, 'src'), 'nested')
     call mkdir(l:deep_dir, 'p')
+    let l:root_vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:deep_vimspector_path = s:path_join(l:deep_dir, '.vimspector')
+    call s:write_json(l:root_vimspector_path, {
+          \ 'variables': {
+          \   'VIM_NAIVE_CMAKE_TARGET': 'root-target',
+          \   'VIM_NAIVE_CMAKE_OUTPUT': 'root-output'
+          \ }
+          \ })
+    call s:write_json(l:deep_vimspector_path, {
+          \ 'variables': {
+          \   'VIM_NAIVE_CMAKE_TARGET': 'deep-target',
+          \   'VIM_NAIVE_CMAKE_OUTPUT': 'deep-output'
+          \ }
+          \ })
     execute 'cd ' . fnameescape(l:deep_dir)
 
     call vim_cmake_naive#set_config_preset('release')
@@ -1068,17 +1151,18 @@ function! s:test_cmake_set_commands_use_nearest_existing_local_config() abort
 
     let l:root_config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     let l:deep_config_path = s:path_join(l:deep_dir, '.vim-cmake-naive-config.json')
-    let l:root_output_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-output')
-    let l:deep_output_state_path = s:path_join(l:deep_dir, '.vim-cmake-naive-output')
     let l:config = s:read_json(l:root_config_path)
+    let l:root_variables = get(s:read_json(l:root_vimspector_path), 'variables', {})
+    let l:deep_variables = get(s:read_json(l:deep_vimspector_path), 'variables', {})
 
     call assert_equal('release', get(l:config, 'preset', ''))
     call assert_equal('RelWithDebInfo', get(l:config, 'build', ''))
     call assert_equal('out/build', get(l:config, 'output', ''))
     call assert_false(filereadable(l:deep_config_path), 'Set commands should update nearest existing parent config, not create nested config.')
-    call assert_true(filereadable(l:root_output_state_path), 'Expected .vim-cmake-naive-output at project root.')
-    call assert_equal(['out/build/release'], readfile(l:root_output_state_path, 'b'))
-    call assert_false(filereadable(l:deep_output_state_path), 'Expected no .vim-cmake-naive-output in nested directory.')
+    call assert_equal('', get(l:root_variables, 'VIM_NAIVE_CMAKE_TARGET', 'MISSING'))
+    call assert_equal('out/build/release', get(l:root_variables, 'VIM_NAIVE_CMAKE_OUTPUT', ''))
+    call assert_equal('deep-target', get(l:deep_variables, 'VIM_NAIVE_CMAKE_TARGET', ''))
+    call assert_equal('deep-output', get(l:deep_variables, 'VIM_NAIVE_CMAKE_OUTPUT', ''))
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -5589,8 +5673,15 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
     call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(l:vimspector_path, {
+          \ 'variables': {
+          \   'VIM_NAIVE_CMAKE_TARGET': 'legacy-target',
+          \   'VIM_NAIVE_CMAKE_OUTPUT': 'legacy-output'
+          \ }
+          \ })
 
     let l:target_app = s:path_join(l:fixture.root, 'build/dev/CMakeFiles/app.dir')
     let l:target_lib = s:path_join(l:fixture.root, 'build/dev/lib/CMakeFiles/mylib.dir')
@@ -5608,14 +5699,14 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
     execute 'silent CMakeSwitchTarget'
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
-    let l:target_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-target')
+    let l:variables = get(s:read_json(l:vimspector_path), 'variables', {})
     call assert_equal(
           \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'keep': 1},
           \ s:read_json(l:config_path))
     call assert_true(filereadable(l:active_commands))
     call assert_equal(readfile(l:target_lib_commands, 'b'), readfile(l:active_commands, 'b'))
-    call assert_true(filereadable(l:target_state_path), 'Expected .vim-cmake-naive-target to be created.')
-    call assert_equal(['mylib'], readfile(l:target_state_path, 'b'))
+    call assert_equal('mylib', get(l:variables, 'VIM_NAIVE_CMAKE_TARGET', ''))
+    call assert_equal('build/dev', get(l:variables, 'VIM_NAIVE_CMAKE_OUTPUT', ''))
   finally
     if l:initial_selection is v:null
       unlet! g:vim_cmake_naive_test_inputlist_response
@@ -5646,8 +5737,15 @@ function! s:test_cmake_switch_target_selects_all_and_removes_target_key() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
     call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
+    call s:write_json(l:vimspector_path, {
+          \ 'variables': {
+          \   'VIM_NAIVE_CMAKE_TARGET': 'legacy-target',
+          \   'VIM_NAIVE_CMAKE_OUTPUT': 'legacy-output'
+          \ }
+          \ })
 
     let l:root_commands = s:path_join(l:fixture.root, 'build/dev/compile_commands.json')
     call s:write_json(l:root_commands, s:fixture_entries())
@@ -5657,14 +5755,14 @@ function! s:test_cmake_switch_target_selects_all_and_removes_target_key() abort
     execute 'silent CMakeSwitchTarget'
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
-    let l:target_state_path = s:path_join(l:fixture.root, '.vim-cmake-naive-target')
+    let l:variables = get(s:read_json(l:vimspector_path), 'variables', {})
     call assert_equal(
           \ {'output': 'build', 'preset': 'dev', 'keep': 1},
           \ s:read_json(l:config_path))
     call assert_true(filereadable(l:active_commands))
     call assert_equal(readfile(l:root_commands, 'b'), readfile(l:active_commands, 'b'))
-    call assert_true(filereadable(l:target_state_path), 'Expected .vim-cmake-naive-target to be created.')
-    call assert_equal([''], readfile(l:target_state_path, 'b'))
+    call assert_equal('', get(l:variables, 'VIM_NAIVE_CMAKE_TARGET', 'MISSING'))
+    call assert_equal('build/dev', get(l:variables, 'VIM_NAIVE_CMAKE_OUTPUT', ''))
   finally
     if l:initial_selection is v:null
       unlet! g:vim_cmake_naive_test_inputlist_response
@@ -6467,7 +6565,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_plugin_registers_plug_mappings_for_commands()
   call s:test_plugin_does_not_register_make_command_abbrev()
   call s:test_plugin_does_not_register_cmake_make_command()
-  call s:test_plugin_startup_syncs_integration_files_from_local_config()
+  call s:test_plugin_startup_syncs_vimspector_variables_from_local_config()
+  call s:test_plugin_startup_does_not_create_vimspector_when_missing()
   call s:test_plugin_startup_syncs_makeprg_when_enabled()
   call s:test_cmake_config_creates_default_local_config()
   call s:test_cmake_config_preserves_existing_file()
@@ -6477,6 +6576,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_set_config_build_config_preserves_other_keys()
   call s:test_cmake_set_config_output_creates_config_with_value()
   call s:test_cmake_set_config_output_preserves_other_keys()
+  call s:test_cmake_set_config_output_does_not_add_missing_vimspector_variables()
   call s:test_cmake_set_config_output_syncs_makeprg_when_enabled()
   call s:test_cmake_set_commands_use_nearest_existing_local_config()
   call s:test_cmake_set_commands_error_when_no_local_config_found()

@@ -9,7 +9,6 @@
 2. Resolves Local Configuration at that root.
 3. Creates `.vim-cmake-naive-config.json` only when it does not already exist.
 4. Initial payload is an empty JSON object (`{}`), not default values.
-5. Updates integration state files (`.vim-cmake-naive-target`,
-   `.vim-cmake-naive-output`) immediately after writing config.
+5. Updates local `.vimspector` integration variable values immediately after
+   writing config, but only when the variable definitions already exist.
 6. If config already exists, command does not overwrite it.
-

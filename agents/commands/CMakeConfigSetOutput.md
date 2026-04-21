@@ -9,6 +9,6 @@
 2. Validates that `<value>` is non-empty.
 3. Resolves Local Configuration in current directory or parent directories.
 4. Sets `output` to the exact provided string.
-5. Updates integration state files, including recalculated
-   `.vim-cmake-naive-output` based on current `preset`.
-
+5. Updates local `.vimspector` integration variable values, including
+   recalculated `VIM_NAIVE_CMAKE_OUTPUT` based on current `preset`, only when
+   those variable definitions already exist.

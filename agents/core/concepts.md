@@ -38,16 +38,17 @@ Resolved from Local Configuration:
 1. If `preset` is empty: `<root>/<output>`
 2. If `preset` is set: `<root>/<output>/<preset>`
 
-## Integration State Files
+## Vimspector Integration Variables
 
-These files are maintained in the Root Directory:
+When local `.vimspector` exists at the Root Directory and has variable
+definitions, these values are updated:
 
-1. `.vim-cmake-naive-target` - current target name (is empty when target key is
-   missing)
-2. `.vim-cmake-naive-output` - current build directory path relative to root
-   (`<output>` or `<output>/<preset>`)
+1. `variables.VIM_NAIVE_CMAKE_TARGET` - current target name (is empty when
+   target key is missing)
+2. `variables.VIM_NAIVE_CMAKE_OUTPUT` - current build directory path relative
+   to root (`<output>` or `<output>/<preset>`)
 
-They are updated whenever local configuration is written.
+Missing `.vimspector` file or missing variable definitions are treated as no-op.
 
 When `g:vim_cmake_naive_sync_makeprg` is enabled, config writes also sync global
 `makeprg` to the same `cmake --build ...` command used by `:CMakeBuild` (useful
@@ -59,8 +60,8 @@ set, config sync also writes that value to global `errorformat`.
 During startup, the plugin:
 
 1. Reads `target` and the resolved Build Directory from Local Configuration.
-2. Saves those values into the Integration State Files
-   (`.vim-cmake-naive-target` and `.vim-cmake-naive-output`).
+2. Saves those values into local `.vimspector` variable definitions
+   (`VIM_NAIVE_CMAKE_TARGET` and `VIM_NAIVE_CMAKE_OUTPUT`) when present.
 
 ## Active and Target Compile Commands
 

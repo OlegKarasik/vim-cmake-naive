@@ -28,7 +28,8 @@
 2. Validates that `<preset>` is non-empty.
 3. Resolves local configuration in current directory or parent directories.
 4. Sets `preset` to the exact provided string.
-5. Updates integration state files.
+5. Updates local `.vimspector` integration variable values when those variable
+   definitions already exist.
 
 ## `vim_cmake_naive#set_config_build_config(<build>)`
 
@@ -36,15 +37,16 @@
 2. Validates that `<build>` is non-empty.
 3. Resolves local configuration in current directory or parent directories.
 4. Sets `build` to the exact provided string.
-5. Updates integration state files.
+5. Updates local `.vimspector` integration variable values when those variable
+   definitions already exist.
 
 ## `vim_cmake_naive#sync_startup_integration_files()`
 
 1. Resolves Root Directory from current working directory.
 2. Resolves nearest existing Local Configuration under that root.
 3. Reads `target` and resolved Build Directory from config.
-4. Writes those values into `.vim-cmake-naive-target` and
-   `.vim-cmake-naive-output`.
+4. Writes those values into local `.vimspector` variable definitions:
+   `VIM_NAIVE_CMAKE_TARGET` and `VIM_NAIVE_CMAKE_OUTPUT`.
 5. If root/config is missing, startup-style call is treated as no-op.
 
 ## `vim_cmake_naive#register_plug_mappings()`
