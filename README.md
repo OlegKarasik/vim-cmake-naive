@@ -353,7 +353,7 @@ This command:
 - popup width is fixed to 30 and height is dynamic up to 10 lines with scrolling
 - copies selected target `compile_commands.json` to `<output>/compile_commands.json`
 - when `all` is selected, copies root `compile_commands.json` to `<output>/compile_commands.json`
-- if local `.vimspector` defines `variables.VIM_CMAKE_NAIVE_TARGET`, updates it with selected target name (empty when `(all)` is selected)
+- if local `.vimspector` defines `VIM_CMAKE_NAIVE_TARGET` in a `variables` block (top-level or nested), updates it with selected target name (empty when `(all)` is selected)
 - if cache file is missing, command reports:
   `No cache found. Please run CMakeGenerate command first.`
 
@@ -367,9 +367,10 @@ Set local CMake output in `.vim-cmake-naive-config.json`:
 This updates the nearest existing `.vim-cmake-naive-config.json` in current
 directory or parent directories. If no local config exists, the command reports
 an error (run `:CMakeConfig` or `:CMakeConfigDefault` first). If local
-`.vimspector` exists and defines integration variables, it also updates
-`variables.VIM_CMAKE_NAIVE_TARGET` and
-`variables.VIM_CMAKE_NAIVE_OUTPUT` (`<output>` or `<output>/<preset>`).
+`.vimspector` exists and defines integration variables in `variables` blocks
+(top-level or nested, for example under `configurations`), it also updates
+`VIM_CMAKE_NAIVE_TARGET` and `VIM_CMAKE_NAIVE_OUTPUT`
+(`<output>` or `<output>/<preset>`).
 
 Optional global settings:
 
@@ -390,9 +391,10 @@ let g:vim_cmake_naive_open_quickfix_on_error = 1
 
 - Errors are reported through Vim messages with a `[vim-cmake-naive]` prefix.
 - Project root detection starts from current directory upward; if no root is found and current buffer has a file path, it retries from that file path.
-- If local `.vimspector` exists and defines `variables.VIM_CMAKE_NAIVE_TARGET`
-  and/or `variables.VIM_CMAKE_NAIVE_OUTPUT`, config writes update those values.
-  Missing file or missing variable definitions are left unchanged.
+- If local `.vimspector` exists and defines `VIM_CMAKE_NAIVE_TARGET` and/or
+  `VIM_CMAKE_NAIVE_OUTPUT` in a `variables` block (top-level or nested), config
+  writes update those values. Missing file or missing variable definitions are
+  left unchanged.
 - All `:CMake*` commands use a shared lock. If another `:CMake*` command is in
   progress, command start is rejected with:
   `CMake: another command <command> is already running`.

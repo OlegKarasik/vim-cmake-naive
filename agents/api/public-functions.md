@@ -45,7 +45,8 @@
 1. Resolves Root Directory from current working directory.
 2. Resolves nearest existing Local Configuration under that root.
 3. Reads `target` and resolved Build Directory from config.
-4. Writes those values into local `.vimspector` variable definitions:
+4. Writes those values into local `.vimspector` `variables` blocks
+   (top-level or nested, for example `configurations.<name>.variables`) for
    `VIM_CMAKE_NAIVE_TARGET` and `VIM_CMAKE_NAIVE_OUTPUT`.
 5. If root/config is missing, startup-style call is treated as no-op.
 

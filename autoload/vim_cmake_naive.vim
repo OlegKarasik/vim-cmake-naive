@@ -4803,6 +4803,68 @@ function! s:integration_build_directory_relative_path(config_path, config) abort
   return s:relative_path(l:build_directory, l:config_root)
 endfunction
 
+function! s:update_vimspector_variables_dict(variables, target_value, output_value) abort
+  if type(a:variables) != v:t_dict
+    return 0
+  endif
+
+  let l:updated = 0
+  if has_key(a:variables, s:vimspector_target_variable_key)
+    let a:variables[s:vimspector_target_variable_key] = a:target_value
+    let l:updated = 1
+  endif
+  if has_key(a:variables, s:vimspector_output_variable_key)
+    let a:variables[s:vimspector_output_variable_key] = a:output_value
+    let l:updated = 1
+  endif
+
+  return l:updated
+endfunction
+
+function! s:update_vimspector_variables_value(value, target_value, output_value) abort
+  let l:updated = 0
+
+  if type(a:value) == v:t_dict
+    let l:variables = get(a:value, 'variables', v:null)
+    if type(l:variables) == v:t_dict
+      if s:update_vimspector_variables_dict(l:variables, a:target_value, a:output_value)
+        let a:value.variables = l:variables
+        let l:updated = 1
+      endif
+    endif
+
+    for [l:key, l:child_value] in items(a:value)
+      if l:key ==# 'variables'
+        continue
+      endif
+
+      if type(l:child_value) == v:t_dict || type(l:child_value) == v:t_list
+        if s:update_vimspector_variables_value(l:child_value, a:target_value, a:output_value)
+          let l:updated = 1
+        endif
+      endif
+    endfor
+    return l:updated
+  endif
+
+  if type(a:value) != v:t_list
+    return 0
+  endif
+
+  let l:index = 0
+  while l:index < len(a:value)
+    let l:list_value = a:value[l:index]
+    if type(l:list_value) == v:t_dict || type(l:list_value) == v:t_list
+      if s:update_vimspector_variables_value(l:list_value, a:target_value, a:output_value)
+        let l:updated = 1
+      endif
+    endif
+    let l:index += 1
+  endwhile
+
+  return l:updated
+endfunction
+
 function! s:update_local_integration_files(config_path, config) abort
   if empty(trim(a:config_path))
     throw 'Config path cannot be empty.'
@@ -4814,22 +4876,10 @@ function! s:update_local_integration_files(config_path, config) abort
   let l:vimspector_path = s:vimspector_path(a:config_path)
   if filereadable(l:vimspector_path)
     let l:vimspector_payload = s:read_json_object(l:vimspector_path)
-    let l:variables = get(l:vimspector_payload, 'variables', v:null)
-    if type(l:variables) == v:t_dict
-      let l:updated = 0
-      if has_key(l:variables, s:vimspector_target_variable_key)
-        let l:variables[s:vimspector_target_variable_key] = s:integration_target_value(a:config)
-        let l:updated = 1
-      endif
-      if has_key(l:variables, s:vimspector_output_variable_key)
-        let l:variables[s:vimspector_output_variable_key] = s:integration_build_directory_relative_path(a:config_path, a:config)
-        let l:updated = 1
-      endif
-
-      if l:updated
-        let l:vimspector_payload.variables = l:variables
-        call s:write_json_file(l:vimspector_path, l:vimspector_payload)
-      endif
+    let l:target_value = s:integration_target_value(a:config)
+    let l:output_value = s:integration_build_directory_relative_path(a:config_path, a:config)
+    if s:update_vimspector_variables_value(l:vimspector_payload, l:target_value, l:output_value)
+      call s:write_json_file(l:vimspector_path, l:vimspector_payload)
     endif
   endif
 

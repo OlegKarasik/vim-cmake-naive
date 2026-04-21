@@ -40,13 +40,14 @@ Resolved from Local Configuration:
 
 ## Vimspector Integration Variables
 
-When local `.vimspector` exists at the Root Directory and has variable
-definitions, these values are updated:
+When local `.vimspector` exists at the Root Directory and has `variables`
+blocks (top-level or nested, for example `configurations.<name>.variables`),
+these values are updated:
 
-1. `variables.VIM_CMAKE_NAIVE_TARGET` - current target name (is empty when
-   target key is missing)
-2. `variables.VIM_CMAKE_NAIVE_OUTPUT` - current build directory path relative
-   to root (`<output>` or `<output>/<preset>`)
+1. `VIM_CMAKE_NAIVE_TARGET` - current target name (is empty when target key is
+   missing)
+2. `VIM_CMAKE_NAIVE_OUTPUT` - current build directory path relative to root
+   (`<output>` or `<output>/<preset>`)
 
 Missing `.vimspector` file or missing variable definitions are treated as no-op.
 
