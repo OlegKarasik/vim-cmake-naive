@@ -43,9 +43,9 @@ Resolved from Local Configuration:
 When local `.vimspector` exists at the Root Directory and has variable
 definitions, these values are updated:
 
-1. `variables.VIM_NAIVE_CMAKE_TARGET` - current target name (is empty when
+1. `variables.VIM_CMAKE_NAIVE_TARGET` - current target name (is empty when
    target key is missing)
-2. `variables.VIM_NAIVE_CMAKE_OUTPUT` - current build directory path relative
+2. `variables.VIM_CMAKE_NAIVE_OUTPUT` - current build directory path relative
    to root (`<output>` or `<output>/<preset>`)
 
 Missing `.vimspector` file or missing variable definitions are treated as no-op.
@@ -61,7 +61,7 @@ During startup, the plugin:
 
 1. Reads `target` and the resolved Build Directory from Local Configuration.
 2. Saves those values into local `.vimspector` variable definitions
-   (`VIM_NAIVE_CMAKE_TARGET` and `VIM_NAIVE_CMAKE_OUTPUT`) when present.
+   (`VIM_CMAKE_NAIVE_TARGET` and `VIM_CMAKE_NAIVE_OUTPUT`) when present.
 
 ## Active and Target Compile Commands
 

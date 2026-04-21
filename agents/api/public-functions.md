@@ -46,7 +46,7 @@
 2. Resolves nearest existing Local Configuration under that root.
 3. Reads `target` and resolved Build Directory from config.
 4. Writes those values into local `.vimspector` variable definitions:
-   `VIM_NAIVE_CMAKE_TARGET` and `VIM_NAIVE_CMAKE_OUTPUT`.
+   `VIM_CMAKE_NAIVE_TARGET` and `VIM_CMAKE_NAIVE_OUTPUT`.
 5. If root/config is missing, startup-style call is treated as no-op.
 
 ## `vim_cmake_naive#register_plug_mappings()`
