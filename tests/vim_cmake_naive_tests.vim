@@ -769,7 +769,7 @@ function! s:test_plugin_startup_syncs_vimspector_variables_from_local_config() a
   try
     call assert_true(!empty(l:plugin_path), 'Expected plugin/vim_cmake_naive.vim to exist in runtimepath.')
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'output': 'out/build', 'preset': 'dev', 'target': 'my_target'})
     call s:write_json(l:vimspector_path, {
           \ 'variables': {
@@ -808,7 +808,7 @@ function! s:test_plugin_startup_syncs_nested_vimspector_variables_from_local_con
   try
     call assert_true(!empty(l:plugin_path), 'Expected plugin/vim_cmake_naive.vim to exist in runtimepath.')
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'output': 'out/build', 'preset': 'dev', 'target': 'my_target'})
     call s:write_json(l:vimspector_path, {
           \ 'configurations': {
@@ -858,7 +858,7 @@ function! s:test_plugin_startup_does_not_create_vimspector_when_missing() abort
   try
     call assert_true(!empty(l:plugin_path), 'Expected plugin/vim_cmake_naive.vim to exist in runtimepath.')
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'output': 'out/build', 'preset': 'dev', 'target': 'my_target'})
     call delete(l:vimspector_path)
 
@@ -866,7 +866,7 @@ function! s:test_plugin_startup_does_not_create_vimspector_when_missing() abort
     unlet! g:loaded_vim_cmake_naive
     execute 'source ' . fnameescape(l:plugin_path)
 
-    call assert_false(filereadable(l:vimspector_path), 'Expected missing .vimspector to remain missing during startup sync.')
+    call assert_false(filereadable(l:vimspector_path), 'Expected missing .vimspector.json to remain missing during startup sync.')
   finally
     if l:initial_loaded_plugin is v:null
       unlet! g:loaded_vim_cmake_naive
@@ -1055,10 +1055,10 @@ function! s:test_cmake_set_config_output_creates_config_with_value() abort
     execute 'silent CMakeConfigSetOutput build'
 
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call assert_true(filereadable(l:config_path), 'Expected .vim-cmake-naive-config.json to be created.')
     call assert_equal({'output': 'build'}, s:read_json(l:config_path))
-    call assert_false(filereadable(l:vimspector_path), 'Expected missing .vimspector to remain missing.')
+    call assert_false(filereadable(l:vimspector_path), 'Expected missing .vimspector.json to remain missing.')
   finally
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -1071,7 +1071,7 @@ function! s:test_cmake_set_config_output_preserves_other_keys() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
     call s:write_json(l:vimspector_path, {
           \ 'variables': {
@@ -1103,7 +1103,7 @@ function! s:test_cmake_set_config_output_updates_nested_vimspector_variables() a
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
     call s:write_json(l:vimspector_path, {
           \ 'configurations': {
@@ -1141,7 +1141,7 @@ function! s:test_cmake_set_config_output_does_not_add_missing_vimspector_variabl
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'preset': 'debug', 'build': 'RelWithDebInfo', 'output': 'old'})
     call s:write_json(l:vimspector_path, {
           \ 'variables': {
@@ -1217,8 +1217,8 @@ function! s:test_cmake_set_commands_use_nearest_existing_local_config() abort
 
     let l:deep_dir = s:path_join(s:path_join(l:fixture.root, 'src'), 'nested')
     call mkdir(l:deep_dir, 'p')
-    let l:root_vimspector_path = s:path_join(l:fixture.root, '.vimspector')
-    let l:deep_vimspector_path = s:path_join(l:deep_dir, '.vimspector')
+    let l:root_vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
+    let l:deep_vimspector_path = s:path_join(l:deep_dir, '.vimspector.json')
     call s:write_json(l:root_vimspector_path, {
           \ 'variables': {
           \   'VIM_CMAKE_NAIVE_TARGET': 'root-target',
@@ -5761,7 +5761,7 @@ function! s:test_cmake_switch_target_sets_selected_target() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
     call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
     call s:write_json(l:vimspector_path, {
@@ -5825,7 +5825,7 @@ function! s:test_cmake_switch_target_updates_nested_vimspector_variables() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
     call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
     call s:write_json(l:vimspector_path, {
@@ -5895,7 +5895,7 @@ function! s:test_cmake_switch_target_selects_all_and_removes_target_key() abort
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
-    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector')
+    let l:vimspector_path = s:path_join(l:fixture.root, '.vimspector.json')
     call s:write_json(l:config_path, {'output': 'build', 'preset': 'dev', 'target': 'old', 'keep': 1})
     call s:write_json(s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json'), {'targets': ['app', 'mylib']})
     call s:write_json(l:vimspector_path, {

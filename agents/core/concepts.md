@@ -40,7 +40,7 @@ Resolved from Local Configuration:
 
 ## Vimspector Integration Variables
 
-When local `.vimspector` exists at the Root Directory and has `variables`
+When local `.vimspector.json` exists at the Root Directory and has `variables`
 blocks (top-level or nested, for example `configurations.<name>.variables`),
 these values are updated:
 
@@ -49,7 +49,7 @@ these values are updated:
 2. `VIM_CMAKE_NAIVE_OUTPUT` - current build directory path relative to root
    (`<output>` or `<output>/<preset>`)
 
-Missing `.vimspector` file or missing variable definitions are treated as no-op.
+Missing `.vimspector.json` file or missing variable definitions are treated as no-op.
 
 When `g:vim_cmake_naive_sync_makeprg` is enabled, config writes also sync global
 `makeprg` to the same `cmake --build ...` command used by `:CMakeBuild` (useful
@@ -61,7 +61,7 @@ set, config sync also writes that value to global `errorformat`.
 During startup, the plugin:
 
 1. Reads `target` and the resolved Build Directory from Local Configuration.
-2. Saves those values into local `.vimspector` variable definitions
+2. Saves those values into local `.vimspector.json` variable definitions
    (`VIM_CMAKE_NAIVE_TARGET` and `VIM_CMAKE_NAIVE_OUTPUT`) when present.
 
 ## Active and Target Compile Commands

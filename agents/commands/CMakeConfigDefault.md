@@ -13,5 +13,5 @@
    2. `preset = ""`
    3. `build = "Debug"`
 5. Preserves unrelated custom keys in existing config.
-6. Updates local `.vimspector` integration variable values when those variable
+6. Updates local `.vimspector.json` integration variable values when those variable
    definitions already exist.
