@@ -255,8 +255,8 @@ This command:
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - popup search mode toggles with `Ctrl+F` (press again to exit)
 - while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
-- while search mode is active, popup title ends with `--SEARCH--`
-- exiting search mode keeps the current filter result
+- while search mode is active, popup title ends with `(SEARCH)`
+- exiting search mode keeps the current filter result and removes `(SEARCH)` from the title
 - shows numbered entries without a current-item `*` marker
 - executes the selected command
 
@@ -271,8 +271,8 @@ This command:
 - uses the same popup style as other selection popups (fixed width 30, smooth borders, dynamic height up to 10)
 - popup search mode toggles with `Ctrl+F` (press again to exit)
 - while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
-- while search mode is active, popup title ends with `--SEARCH--`
-- exiting search mode keeps the current filter result
+- while search mode is active, popup title ends with `(SEARCH)`
+- exiting search mode keeps the current filter result and removes `(SEARCH)` from the title
 - shows numbered entries without a current-item `*` marker
 - executes the selected command
 - asks for arguments when a selected command requires them (for example `CMakeConfigSetOutput`)
@@ -294,8 +294,8 @@ This command:
 - when `none` is selected, removes `preset` key from local config
 - popup search mode toggles with `Ctrl+F` (press again to exit)
 - while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
-- while search mode is active, popup title ends with `--SEARCH--`
-- exiting search mode keeps the current filter result
+- while search mode is active, popup title ends with `(SEARCH)`
+- exiting search mode keeps the current filter result and removes `(SEARCH)` from the title
 - popup entries are ordered and prefixed with a number
 - currently selected preset is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
@@ -319,8 +319,8 @@ This command:
 - when `none` is selected, removes `build` key from local config
 - popup search mode toggles with `Ctrl+F` (press again to exit)
 - while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
-- while search mode is active, popup title ends with `--SEARCH--`
-- exiting search mode keeps the current filter result
+- while search mode is active, popup title ends with `(SEARCH)`
+- exiting search mode keeps the current filter result and removes `(SEARCH)` from the title
 - popup entries are ordered and prefixed with a number
 - currently selected build type is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors
@@ -344,8 +344,8 @@ This command:
 - when `all` is selected, removes `target` key from local config
 - popup search mode toggles with `Ctrl+F` (press again to exit)
 - while search mode is active, every typed character updates filtering immediately (`Backspace` removes, `Ctrl-U` clears)
-- while search mode is active, popup title ends with `--SEARCH--`
-- exiting search mode keeps the current filter result
+- while search mode is active, popup title ends with `(SEARCH)`
+- exiting search mode keeps the current filter result and removes `(SEARCH)` from the title
 - popup entries are ordered and prefixed with a number
 - currently selected target is marked with `*`
 - popup uses smooth single-line borders with standard Vim popup colors

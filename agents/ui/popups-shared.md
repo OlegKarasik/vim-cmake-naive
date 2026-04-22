@@ -30,14 +30,14 @@
 ## Search mode
 
 1. `Ctrl+F` toggles search mode on/off
-2. while search mode is on, title ends with `--SEARCH--`
-3. with query text, title becomes `<Prompt> [<query>] --SEARCH--`
+2. while search mode is on, title ends with `(SEARCH)`
+3. with query text and search mode on, title becomes `<Prompt> [<query>] (SEARCH)`
 4. search is case-insensitive substring matching
 5. query updates after each typed character
 6. `Backspace`, `Ctrl+H`, `Del`, and `kDel` remove one character
 7. `Ctrl+U` clears query
 8. leaving search mode keeps current query/filter active and title in
-   `<Prompt> [<query>] --SEARCH--` format
+   `<Prompt> [<query>]` format
 
 ## Key precedence
 

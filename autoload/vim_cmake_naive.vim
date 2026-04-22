@@ -1804,10 +1804,14 @@ function! s:switch_target_popup_title(prompt, query, ...) abort
   let l:query = s:to_string_or_empty(a:query)
   let l:search_mode = a:0 > 0 ? s:as_condition_bool(a:1) : !empty(l:query)
   if empty(l:query)
-    return l:search_mode ? a:prompt . ' --SEARCH--' : a:prompt
+    return l:search_mode ? a:prompt . ' (SEARCH)' : a:prompt
   endif
 
-  return a:prompt . ' [' . l:query . '] --SEARCH--'
+  if l:search_mode
+    return a:prompt . ' [' . l:query . '] (SEARCH)'
+  endif
+
+  return a:prompt . ' [' . l:query . ']'
 endfunction
 
 function! s:switch_target_popup_display_items(items, current_target) abort

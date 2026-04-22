@@ -4675,7 +4675,7 @@ function! s:test_cmake_menu_popup_filters_items_by_search_query() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(['1.   CMakeConfigDefault'], get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
-    call assert_equal('Select command [CONFIGDEFAULT] --SEARCH--', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
+    call assert_equal('Select command [CONFIGDEFAULT] (SEARCH)', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_true(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_use_popup is v:null
@@ -4741,7 +4741,7 @@ function! s:test_cmake_menu_popup_retains_filter_when_search_mode_exits() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(['1.   CMakeConfigDefault'], get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
-    call assert_equal('Select command [CONFIGDEFAULT] --SEARCH--', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
+    call assert_equal('Select command [CONFIGDEFAULT]', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_false(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_use_popup is v:null
@@ -5254,7 +5254,7 @@ function! s:test_switch_preset_popup_filters_items_by_search_query() abort
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(['1.   dev'], get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
-    call assert_equal('Select preset [DEV] --SEARCH--', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
+    call assert_equal('Select preset [DEV] (SEARCH)', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal({'preset': 'dev', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -5319,7 +5319,7 @@ function! s:test_switch_preset_popup_retains_filter_when_search_mode_exits() abo
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(['1.   dev'], get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
-    call assert_equal('Select preset [DEV] --SEARCH--', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
+    call assert_equal('Select preset [DEV]', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal({'preset': 'old', 'build': 'Debug', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -5655,7 +5655,7 @@ function! s:test_switch_build_popup_filters_items_by_search_query() abort
     call vim_cmake_naive#switch_build()
 
     call assert_equal(['1.   MinSizeRel'], get(g:, 'vim_cmake_naive_test_last_build_popup_items', []))
-    call assert_equal('Select build [MIN] --SEARCH--', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
+    call assert_equal('Select build [MIN] (SEARCH)', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
     call assert_equal({'build': 'MinSizeRel', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -5717,7 +5717,7 @@ function! s:test_switch_build_popup_retains_filter_when_search_mode_exits() abor
     call vim_cmake_naive#switch_build()
 
     call assert_equal(['1.   MinSizeRel'], get(g:, 'vim_cmake_naive_test_last_build_popup_items', []))
-    call assert_equal('Select build [MIN] --SEARCH--', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
+    call assert_equal('Select build [MIN]', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
     call assert_equal({'build': 'RelWithDebInfo', 'preset': 'dev', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -6517,7 +6517,7 @@ function! s:test_switch_target_popup_filters_items_by_search_query() abort
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
     call assert_equal(['1.   mylib'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
-    call assert_equal('Select target [LIB] --SEARCH--', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
+    call assert_equal('Select target [LIB] (SEARCH)', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxwidth', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_target_popup_options, 'minheight', 0))
@@ -6597,7 +6597,7 @@ function! s:test_switch_target_popup_retains_filter_when_search_mode_exits() abo
     call vim_cmake_naive#switch_target()
 
     call assert_equal(['1.   mylib'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
-    call assert_equal('Select target [LIB] --SEARCH--', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
+    call assert_equal('Select target [LIB]', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal({'output': 'build', 'preset': 'dev', 'target': 'old'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
