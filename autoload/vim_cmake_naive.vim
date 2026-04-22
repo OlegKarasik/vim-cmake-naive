@@ -1804,10 +1804,10 @@ function! s:switch_target_popup_title(prompt, query, ...) abort
   let l:query = s:to_string_or_empty(a:query)
   let l:search_mode = a:0 > 0 ? s:as_condition_bool(a:1) : !empty(l:query)
   if empty(l:query)
-    return l:search_mode ? a:prompt . ' (Insert)' : a:prompt
+    return l:search_mode ? a:prompt . ' --SEARCH--' : a:prompt
   endif
 
-  return a:prompt . ' [' . l:query . '] (Insert)'
+  return a:prompt . ' [' . l:query . '] --SEARCH--'
 endfunction
 
 function! s:switch_target_popup_display_items(items, current_target) abort
@@ -1846,7 +1846,7 @@ function! s:is_switch_target_popup_backspace_key(key) abort
 endfunction
 
 function! s:is_switch_target_popup_search_toggle_key(key) abort
-  return a:key ==# "\<C-I>"
+  return a:key ==# "\<C-F>"
 endfunction
 
 function! s:on_switch_target_popup_filter(popup_id, key) abort
@@ -4879,7 +4879,7 @@ function! s:update_local_integration_files(config_path, config) abort
     let l:target_value = s:integration_target_value(a:config)
     let l:output_value = s:integration_build_directory_relative_path(a:config_path, a:config)
     if s:update_vimspector_variables_value(l:vimspector_payload, l:target_value, l:output_value)
-      call s:write_json_file(l:vimspector_path, l:vimspector_payload)
+      call s:write_pretty_json_file(l:vimspector_path, l:vimspector_payload)
     endif
   endif
 
@@ -5187,6 +5187,76 @@ function! s:read_json_object(path) abort
   endif
 
   return l:value
+endfunction
+
+function! s:json_pretty_lines(value) abort
+  if type(a:value) == v:t_dict
+    if empty(a:value)
+      return ['{}']
+    endif
+
+    let l:lines = ['{']
+    let l:pairs = items(a:value)
+    let l:last_pair_index = len(l:pairs) - 1
+    let l:pair_index = 0
+
+    while l:pair_index < len(l:pairs)
+      let l:key = l:pairs[l:pair_index][0]
+      let l:item_lines = s:json_pretty_lines(l:pairs[l:pair_index][1])
+      call add(l:lines, '  ' . json_encode(l:key) . ': ' . l:item_lines[0])
+
+      let l:item_line_index = 1
+      while l:item_line_index < len(l:item_lines)
+        call add(l:lines, '  ' . l:item_lines[l:item_line_index])
+        let l:item_line_index += 1
+      endwhile
+
+      if l:pair_index < l:last_pair_index
+        let l:lines[-1] .= ','
+      endif
+
+      let l:pair_index += 1
+    endwhile
+
+    call add(l:lines, '}')
+    return l:lines
+  endif
+
+  if type(a:value) == v:t_list
+    if empty(a:value)
+      return ['[]']
+    endif
+
+    let l:lines = ['[']
+    let l:last_item_index = len(a:value) - 1
+    let l:item_index = 0
+
+    while l:item_index < len(a:value)
+      let l:item_lines = s:json_pretty_lines(a:value[l:item_index])
+      call add(l:lines, '  ' . l:item_lines[0])
+
+      let l:item_line_index = 1
+      while l:item_line_index < len(l:item_lines)
+        call add(l:lines, '  ' . l:item_lines[l:item_line_index])
+        let l:item_line_index += 1
+      endwhile
+
+      if l:item_index < l:last_item_index
+        let l:lines[-1] .= ','
+      endif
+
+      let l:item_index += 1
+    endwhile
+
+    call add(l:lines, ']')
+    return l:lines
+  endif
+
+  return [json_encode(a:value)]
+endfunction
+
+function! s:write_pretty_json_file(path, value) abort
+  call writefile(s:json_pretty_lines(a:value), a:path, 'b')
 endfunction
 
 function! s:write_json_file(path, value) abort

@@ -784,9 +784,12 @@ function! s:test_plugin_startup_syncs_vimspector_variables_from_local_config() a
     execute 'source ' . fnameescape(l:plugin_path)
 
     let l:variables = get(s:read_json(l:vimspector_path), 'variables', {})
+    let l:vimspector_lines = readfile(l:vimspector_path, 'b')
     call assert_equal('my_target', get(l:variables, 'VIM_CMAKE_NAIVE_TARGET', ''))
     call assert_equal('out/build/dev', get(l:variables, 'VIM_CMAKE_NAIVE_OUTPUT', ''))
     call assert_equal('keep', get(l:variables, 'KEEP_ME', ''))
+    call assert_true(len(l:vimspector_lines) > 1, 'Expected .vimspector.json updates to be pretty-printed.')
+    call assert_true(index(l:vimspector_lines, '  "variables": {') >= 0, 'Expected pretty-printed variables block in .vimspector.json.')
   finally
     if l:initial_loaded_plugin is v:null
       unlet! g:loaded_vim_cmake_naive
@@ -4672,7 +4675,7 @@ function! s:test_cmake_menu_popup_filters_items_by_search_query() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(['1.   CMakeConfigDefault'], get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
-    call assert_equal('Select command [CONFIGDEFAULT] (Insert)', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
+    call assert_equal('Select command [CONFIGDEFAULT] --SEARCH--', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_true(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_use_popup is v:null
@@ -4738,7 +4741,7 @@ function! s:test_cmake_menu_popup_retains_filter_when_search_mode_exits() abort
     call vim_cmake_naive#menu_full()
 
     call assert_equal(['1.   CMakeConfigDefault'], get(g:, 'vim_cmake_naive_test_last_menu_popup_items', []))
-    call assert_equal('Select command [CONFIGDEFAULT] (Insert)', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
+    call assert_equal('Select command [CONFIGDEFAULT] --SEARCH--', get(g:vim_cmake_naive_test_last_menu_popup_options, 'title', ''))
     call assert_false(filereadable(s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')))
   finally
     if l:initial_use_popup is v:null
@@ -5251,7 +5254,7 @@ function! s:test_switch_preset_popup_filters_items_by_search_query() abort
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(['1.   dev'], get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
-    call assert_equal('Select preset [DEV] (Insert)', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
+    call assert_equal('Select preset [DEV] --SEARCH--', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal({'preset': 'dev', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -5316,7 +5319,7 @@ function! s:test_switch_preset_popup_retains_filter_when_search_mode_exits() abo
     call vim_cmake_naive#switch_preset()
 
     call assert_equal(['1.   dev'], get(g:, 'vim_cmake_naive_test_last_preset_popup_items', []))
-    call assert_equal('Select preset [DEV] (Insert)', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
+    call assert_equal('Select preset [DEV] --SEARCH--', get(g:vim_cmake_naive_test_last_preset_popup_options, 'title', ''))
     call assert_equal({'preset': 'old', 'build': 'Debug', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -5652,7 +5655,7 @@ function! s:test_switch_build_popup_filters_items_by_search_query() abort
     call vim_cmake_naive#switch_build()
 
     call assert_equal(['1.   MinSizeRel'], get(g:, 'vim_cmake_naive_test_last_build_popup_items', []))
-    call assert_equal('Select build [MIN] (Insert)', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
+    call assert_equal('Select build [MIN] --SEARCH--', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
     call assert_equal({'build': 'MinSizeRel', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -5714,7 +5717,7 @@ function! s:test_switch_build_popup_retains_filter_when_search_mode_exits() abor
     call vim_cmake_naive#switch_build()
 
     call assert_equal(['1.   MinSizeRel'], get(g:, 'vim_cmake_naive_test_last_build_popup_items', []))
-    call assert_equal('Select build [MIN] (Insert)', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
+    call assert_equal('Select build [MIN] --SEARCH--', get(g:vim_cmake_naive_test_last_build_popup_options, 'title', ''))
     call assert_equal({'build': 'RelWithDebInfo', 'preset': 'dev', 'keep': 1}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
@@ -6514,7 +6517,7 @@ function! s:test_switch_target_popup_filters_items_by_search_query() abort
 
     let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
     call assert_equal(['1.   mylib'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
-    call assert_equal('Select target [LIB] (Insert)', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
+    call assert_equal('Select target [LIB] --SEARCH--', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'minwidth', 0))
     call assert_equal(30, get(g:vim_cmake_naive_test_last_target_popup_options, 'maxwidth', 0))
     call assert_equal(1, get(g:vim_cmake_naive_test_last_target_popup_options, 'minheight', 0))
@@ -6594,7 +6597,7 @@ function! s:test_switch_target_popup_retains_filter_when_search_mode_exits() abo
     call vim_cmake_naive#switch_target()
 
     call assert_equal(['1.   mylib'], get(g:, 'vim_cmake_naive_test_last_target_popup_items', []))
-    call assert_equal('Select target [LIB] (Insert)', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
+    call assert_equal('Select target [LIB] --SEARCH--', get(g:vim_cmake_naive_test_last_target_popup_options, 'title', ''))
     call assert_equal({'output': 'build', 'preset': 'dev', 'target': 'old'}, s:read_json(l:config_path))
   finally
     if l:initial_use_popup is v:null
