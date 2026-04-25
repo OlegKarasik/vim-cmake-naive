@@ -26,7 +26,9 @@
    Vim message with terminal title, runtime, and `[Success]` or `[Error]`
    suffix.
 11. On successful completion:
-   1. reads root `compile_commands.json` from scan directory
-   2. discovers available targets
-   3. updates `.vim-cmake-naive-cache.json` key `targets`
-   4. splits root compile database into target-local compile databases
+    1. reads root `compile_commands.json` from scan directory
+    2. discovers available targets
+    3. updates `.vim-cmake-naive-cache.json` key `targets`
+    4. splits root compile database into target-local compile databases
+    5. when config `target` is non-empty, reapplies that target selection
+       (same effect as `CMakeSwitchTarget` for that target)

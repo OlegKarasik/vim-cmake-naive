@@ -2228,6 +2228,70 @@ function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_command
   endtry
 endfunction
 
+function! s:test_cmake_generate_reselects_configured_target_when_target_is_set() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {
+          \ 'output': 'out/build-dir',
+          \ 'preset': 'dev',
+          \ 'target': 'mylib',
+          \ 'build': 'Release',
+          \ 'keep': 1
+          \ })
+
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-cache-reselect-target-args.txt')
+    let l:bin_dir = s:create_fake_cmake_generate_script_with_compile_commands(
+          \ l:fixture.root,
+          \ l:args_path,
+          \ s:fixture_entries(),
+          \ 0)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#generate()
+
+    let l:cache_path = s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json')
+    let l:active_commands = s:path_join(l:fixture.root, 'out/build-dir/compile_commands.json')
+    let l:selected_target_commands = s:path_join(
+          \ s:path_join(s:path_join(l:fixture.root, 'out/build-dir/dev/lib/CMakeFiles'), 'mylib.dir'),
+          \ 'compile_commands.json')
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
+    call assert_true(s:wait_for_file(l:selected_target_commands, 1000), 'Expected selected target compile_commands.json to be written.')
+    call assert_true(s:wait_for_file(l:active_commands, 1000), 'Expected active compile_commands.json to be written.')
+    call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
+    call assert_equal(
+          \ {'output': 'out/build-dir', 'preset': 'dev', 'target': 'mylib', 'build': 'Release', 'keep': 1},
+          \ s:read_json(l:config_path))
+    call assert_equal(readfile(l:selected_target_commands, 'b'), readfile(l:active_commands, 'b'))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_generate_ignores_targets_from_deps_directory() abort
   if !has('unix')
     return
@@ -7005,6 +7069,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_generate_errors_when_no_cmakelists_found()
   call s:test_cmake_generate_updates_targets_cache_and_splits_compile_commands()
   call s:test_cmake_generate_updates_targets_cache_and_splits_compile_commands_for_preset_directory()
+  call s:test_cmake_generate_reselects_configured_target_when_target_is_set()
   call s:test_cmake_generate_ignores_targets_from_deps_directory()
   call s:test_cmake_build_creates_default_config_and_invokes_cmake_build()
   call s:test_cmake_build_uses_existing_config_preset_and_target()

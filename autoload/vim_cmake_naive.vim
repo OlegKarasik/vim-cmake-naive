@@ -1737,7 +1737,12 @@ function! s:maybe_reselect_target_for_switched_preset(config_path, config, selec
     return
   endif
 
-  call s:apply_switch_target_selection(l:target_value, l:preset_value, l:build_directory, l:scan_directory)
+  call s:apply_switch_target_selection(
+        \ l:target_value,
+        \ l:preset_value,
+        \ l:build_directory,
+        \ l:scan_directory,
+        \ a:config_path)
 endfunction
 
 function! s:apply_switch_build_selection(selected_build) abort
@@ -2014,21 +2019,78 @@ function! s:apply_switch_target_popup_selection(state, result) abort
   endtry
 endfunction
 
-function! s:apply_switch_target_selection(selected_target, preset_value, build_directory, scan_directory) abort
+function! s:apply_switch_target_selection(selected_target, preset_value, build_directory, scan_directory, ...) abort
+  let l:config_path = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
   if a:selected_target ==# s:cmake_switch_target_all_name
     let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
           \ a:build_directory,
           \ a:scan_directory,
           \ a:preset_value)
     call s:copy_compile_commands_file(l:root_compile_commands_path, a:build_directory)
-    call s:remove_config_value(s:cmake_config_target_key, 1)
+    call s:remove_switch_target_config_value(l:config_path)
     return
   endif
 
   let l:target_directory = s:resolve_selected_target_directory(a:selected_target, a:scan_directory)
   let l:source_file_path = s:path_join(l:target_directory, s:default_input_filename)
   call s:copy_compile_commands_file(l:source_file_path, a:build_directory)
-  call s:set_config_value(s:cmake_config_target_key, a:selected_target, 1)
+  call s:set_switch_target_config_value(a:selected_target, l:config_path)
+endfunction
+
+function! s:set_switch_target_config_value(target_name, config_path) abort
+  let l:config_path = trim(s:to_string_or_empty(a:config_path))
+  if empty(l:config_path)
+    call s:set_config_value(s:cmake_config_target_key, a:target_name, 1)
+    return
+  endif
+
+  call s:set_existing_config_value_by_path(l:config_path, s:cmake_config_target_key, a:target_name)
+endfunction
+
+function! s:remove_switch_target_config_value(config_path) abort
+  let l:config_path = trim(s:to_string_or_empty(a:config_path))
+  if empty(l:config_path)
+    call s:remove_config_value(s:cmake_config_target_key, 1)
+    return
+  endif
+
+  call s:remove_existing_config_value_by_path(l:config_path, s:cmake_config_target_key)
+endfunction
+
+function! s:set_existing_config_value_by_path(config_path, key, value) abort
+  let l:config_path = trim(s:to_string_or_empty(a:config_path))
+  if empty(l:config_path)
+    throw 'Config path cannot be empty.'
+  endif
+  let l:config_path = s:normalize_full_path(l:config_path)
+  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
+  let l:config = s:read_json_object(l:config_path)
+
+  let l:config[a:key] = a:value
+  call mkdir(fnamemodify(l:config_path, ':h'), 'p')
+  call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
+
+  call s:write_info('Set ' . a:key . ' "' . a:value . '" in ' . s:relative_path(l:config_path, l:config_root))
+endfunction
+
+function! s:remove_existing_config_value_by_path(config_path, key) abort
+  let l:config_path = trim(s:to_string_or_empty(a:config_path))
+  if empty(l:config_path)
+    throw 'Config path cannot be empty.'
+  endif
+  let l:config_path = s:normalize_full_path(l:config_path)
+  let l:config_root = s:normalize_full_path(fnamemodify(l:config_path, ':h'))
+  let l:config = s:read_json_object(l:config_path)
+
+  if has_key(l:config, a:key)
+    call remove(l:config, a:key)
+  endif
+  call mkdir(fnamemodify(l:config_path, ':h'), 'p')
+  call s:write_json_file(l:config_path, l:config)
+  call s:update_local_integration_files(l:config_path, l:config)
+
+  call s:write_info('Removed ' . a:key . ' from ' . s:relative_path(l:config_path, l:config_root))
 endfunction
 
 function! s:cached_targets_for_switch(config_path) abort
@@ -2823,12 +2885,40 @@ function! s:update_generate_targets_cache_and_split(context) abort
         \ 'output_name': s:default_output_filename,
         \ 'dry_run': 0
         \ })
+  let l:config = s:read_json_object(l:config_path)
+  call s:maybe_reselect_configured_target_after_generate(
+        \ l:config_path,
+        \ l:config,
+        \ l:build_directory,
+        \ l:scan_directory)
 
   if !empty(l:project_root)
     call s:write_info('Updated target cache in ' . s:relative_path(l:cache_path, l:project_root))
   else
     call s:write_info('Updated target cache in ' . l:cache_path)
   endif
+endfunction
+
+function! s:maybe_reselect_configured_target_after_generate(config_path, config, build_directory, scan_directory) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if type(a:config) != v:t_dict
+    throw 'Config payload must be a JSON object.'
+  endif
+
+  let l:target_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_target_key, '')))
+  if empty(l:target_value)
+    return
+  endif
+
+  let l:preset_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_preset_key, '')))
+  call s:apply_switch_target_selection(
+        \ l:target_value,
+        \ l:preset_value,
+        \ a:build_directory,
+        \ a:scan_directory,
+        \ a:config_path)
 endfunction
 
 function! s:update_local_targets_cache(config_path, targets) abort
