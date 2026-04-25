@@ -5122,6 +5122,101 @@ function! s:test_cmake_switch_preset_menu_fallback_displays_parenthesized_none()
   endtry
 endfunction
 
+function! s:test_cmake_switch_preset_reselects_current_target_when_new_preset_has_compile_commands() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'old', 'target': 'mylib', 'keep': 1})
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [{'name': 'old'}, {'name': 'dev'}])
+
+    let l:new_scan_directory = s:path_join(l:fixture.root, 'build/dev')
+    let l:new_target_directory = s:path_join(l:new_scan_directory, 'lib/CMakeFiles/mylib.dir')
+    let l:new_root_commands = s:path_join(l:new_scan_directory, 'compile_commands.json')
+    let l:new_target_commands = s:path_join(l:new_target_directory, 'compile_commands.json')
+    let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
+    call mkdir(l:new_target_directory, 'p')
+    call s:write_json(l:new_root_commands, s:fixture_entries())
+    call s:write_json(l:new_target_commands, [{'file': '../lib/new.cpp'}])
+    call s:write_json(l:active_commands, [{'file': '../lib/old.cpp'}])
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_menu_response = 2
+    let g:vim_cmake_naive_test_inputlist_response = 2
+    call vim_cmake_naive#switch_preset()
+
+    call assert_equal(
+          \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'keep': 1},
+          \ s:read_json(l:config_path))
+    call assert_equal(readfile(l:new_target_commands, 'b'), readfile(l:active_commands, 'b'))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_switch_preset_skips_target_reselection_without_new_preset_root_compile_commands() abort
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_selection = get(g:, 'vim_cmake_naive_test_inputlist_response', v:null)
+  let l:initial_menu_selection = get(g:, 'vim_cmake_naive_test_menu_response', v:null)
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'build', 'preset': 'old', 'target': 'mylib', 'keep': 1})
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [{'name': 'old'}, {'name': 'dev'}])
+
+    let l:new_scan_directory = s:path_join(l:fixture.root, 'build/dev')
+    let l:new_target_directory = s:path_join(l:new_scan_directory, 'lib/CMakeFiles/mylib.dir')
+    let l:new_target_commands = s:path_join(l:new_target_directory, 'compile_commands.json')
+    let l:active_commands = s:path_join(l:fixture.root, 'build/compile_commands.json')
+    call mkdir(l:new_target_directory, 'p')
+    call s:write_json(l:new_target_commands, [{'file': '../lib/new.cpp'}])
+    call s:write_json(l:active_commands, [{'file': '../lib/old.cpp'}])
+    let l:active_before = readfile(l:active_commands, 'b')
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_menu_response = 2
+    let g:vim_cmake_naive_test_inputlist_response = 2
+    call vim_cmake_naive#switch_preset()
+
+    call assert_equal(
+          \ {'output': 'build', 'preset': 'dev', 'target': 'mylib', 'keep': 1},
+          \ s:read_json(l:config_path))
+    call assert_equal(l:active_before, readfile(l:active_commands, 'b'))
+  finally
+    if l:initial_selection is v:null
+      unlet! g:vim_cmake_naive_test_inputlist_response
+    else
+      let g:vim_cmake_naive_test_inputlist_response = l:initial_selection
+    endif
+    if l:initial_menu_selection is v:null
+      unlet! g:vim_cmake_naive_test_menu_response
+    else
+      let g:vim_cmake_naive_test_menu_response = l:initial_menu_selection
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_preset_popup_display_items_formats_ordered_list_and_current_marker() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
@@ -6851,6 +6946,8 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_switch_preset_cancels_without_changing_config()
   call s:test_cmake_switch_preset_only_none_is_selectable_when_no_visible_presets()
   call s:test_cmake_switch_preset_menu_fallback_displays_parenthesized_none()
+  call s:test_cmake_switch_preset_reselects_current_target_when_new_preset_has_compile_commands()
+  call s:test_cmake_switch_preset_skips_target_reselection_without_new_preset_root_compile_commands()
   call s:test_preset_popup_display_items_formats_ordered_list_and_current_marker()
   call s:test_switch_preset_popup_display_items_marks_none_when_preset_missing()
   call s:test_switch_preset_popup_filters_items_by_search_query()

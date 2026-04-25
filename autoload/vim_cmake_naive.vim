@@ -1682,13 +1682,62 @@ function! s:apply_switch_build_popup_selection(state, result) abort
 endfunction
 
 function! s:apply_switch_preset_selection(selected_preset) abort
+  let l:working_directory = s:normalize_full_path(getcwd())
+  let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
+  let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
+  let l:config_path = s:resolve_existing_local_config_path(l:project_start_directory, l:project_root)
+  let l:config = s:read_json_object(l:config_path)
+
   if a:selected_preset ==# s:cmake_switch_preset_none_name
     call s:remove_config_value(s:cmake_config_preset_key, 1)
     return
   endif
 
+  let l:current_preset = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   call s:run_set_config_preset(a:selected_preset)
   call s:remove_config_value(s:cmake_config_build_config_key, 1)
+
+  if a:selected_preset !=# l:current_preset
+    call s:maybe_reselect_target_for_switched_preset(l:config_path, l:config, a:selected_preset)
+  endif
+endfunction
+
+function! s:maybe_reselect_target_for_switched_preset(config_path, config, selected_preset) abort
+  if empty(trim(a:config_path))
+    throw 'Config path cannot be empty.'
+  endif
+  if type(a:config) != v:t_dict
+    throw 'Config payload must be a JSON object.'
+  endif
+
+  let l:target_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_target_key, '')))
+  if empty(l:target_value)
+    return
+  endif
+
+  let l:preset_value = trim(s:to_string_or_empty(a:selected_preset))
+  if empty(l:preset_value)
+    return
+  endif
+
+  let l:project_root = s:normalize_full_path(fnamemodify(a:config_path, ':h'))
+  let l:output_value = trim(s:to_string_or_empty(get(a:config, s:cmake_config_output_key, s:cmake_config_default_output)))
+  if empty(l:output_value)
+    let l:output_value = s:cmake_config_default_output
+  endif
+
+  let l:build_directory = s:resolve_path(l:output_value, l:project_root)
+  if !isdirectory(l:build_directory)
+    return
+  endif
+
+  let l:scan_directory = s:target_scan_directory(l:build_directory, l:preset_value)
+  let l:root_compile_commands_path = s:path_join(l:scan_directory, s:default_input_filename)
+  if !filereadable(l:root_compile_commands_path)
+    return
+  endif
+
+  call s:apply_switch_target_selection(l:target_value, l:preset_value, l:build_directory, l:scan_directory)
 endfunction
 
 function! s:apply_switch_build_selection(selected_build) abort

@@ -20,3 +20,7 @@
 7. On selection:
    1. `(none)` removes `preset`
    2. any preset name sets `preset` and removes `build`
+   3. when a different preset is selected and current config has `target`, if
+      `<output>/<preset>/compile_commands.json` exists, it reapplies the same
+      target against the new preset directory (same behavior as
+      `:CMakeSwitchTarget` for that target)
