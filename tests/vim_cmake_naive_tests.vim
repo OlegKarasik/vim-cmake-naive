@@ -52,6 +52,8 @@ function! s:create_build_fixture() abort
 endfunction
 
 function! s:create_cmake_project_fixture() abort
+  call s:wait_for_running_cmake_command_release(60000)
+
   let l:root = tempname()
   call mkdir(l:root, 'p')
   call writefile(['cmake_minimum_required(VERSION 3.20)', 'project(vim_cmake_naive_test)'], s:path_join(l:root, 'CMakeLists.txt'), 'b')
@@ -164,55 +166,68 @@ function! s:assert_cmake_build_parallel_args(args_lines, build_directory, ...) a
   call assert_equal(a:000, a:args_lines[4:])
 endfunction
 
-function! s:wait_for_file(path, timeout_ms) abort
-  let l:elapsed = 0
-  while !filereadable(a:path) && l:elapsed < a:timeout_ms
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
+function! s:wait_for_condition(timeout_ms, Condition) abort
+  let l:timeout_ms = a:timeout_ms
+  if l:timeout_ms < 0
+    let l:timeout_ms = 0
+  endif
 
-  return filereadable(a:path)
-endfunction
+  if exists('*wait')
+    call wait(l:timeout_ms, {-> call(a:Condition, []) ? 1 : 0}, 10)
+    return call(a:Condition, []) ? 1 : 0
+  endif
 
-function! s:wait_for_captured_build_terminal_output(fragment, timeout_ms) abort
   let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
-    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
-    if stridx(l:terminal_text, a:fragment) >= 0
-      return l:terminal
+  while l:elapsed < l:timeout_ms
+    if call(a:Condition, [])
+      return 1
     endif
     sleep 10m
     let l:elapsed += 10
   endwhile
 
+  return call(a:Condition, []) ? 1 : 0
+endfunction
+
+function! s:wait_for_file(path, timeout_ms) abort
+  call s:wait_for_condition(a:timeout_ms, {-> filereadable(a:path)})
+  return filereadable(a:path)
+endfunction
+
+function! s:captured_build_terminal_text() abort
+  let l:terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
+  return join(get(l:terminal, 'lines', []), "\n")
+endfunction
+
+function! s:wait_for_captured_build_terminal_output(fragment, timeout_ms) abort
+  call s:wait_for_condition(a:timeout_ms, {-> stridx(s:captured_build_terminal_text(), a:fragment) >= 0})
   return get(g:, 'vim_cmake_naive_test_last_build_terminal', {})
 endfunction
 
-function! s:wait_for_running_terminal_window(timeout_ms) abort
+function! s:running_terminal_window_id() abort
   if !exists('*getwininfo') || !exists('*term_getstatus')
     return 0
   endif
 
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    for l:window_info in getwininfo()
-      let l:buffer_number = get(l:window_info, 'bufnr', -1)
-      if l:buffer_number <= 0
-        continue
-      endif
-      if getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
-        continue
-      endif
-      if stridx(term_getstatus(l:buffer_number), 'running') >= 0
-        return get(l:window_info, 'winid', 0)
-      endif
-    endfor
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
+  for l:window_info in getwininfo()
+    let l:buffer_number = get(l:window_info, 'bufnr', -1)
+    if l:buffer_number <= 0
+      continue
+    endif
+    if getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+      continue
+    endif
+    if stridx(term_getstatus(l:buffer_number), 'running') >= 0
+      return get(l:window_info, 'winid', 0)
+    endif
+  endfor
 
   return 0
+endfunction
+
+function! s:wait_for_running_terminal_window(timeout_ms) abort
+  call s:wait_for_condition(a:timeout_ms, {-> s:running_terminal_window_id() > 0})
+  return s:running_terminal_window_id()
 endfunction
 
 function! s:has_running_progress_message(terminal_title) abort
@@ -229,15 +244,7 @@ function! s:has_running_progress_message(terminal_title) abort
 endfunction
 
 function! s:wait_for_running_progress_message(terminal_title, timeout_ms) abort
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    if s:has_running_progress_message(a:terminal_title)
-      return 1
-    endif
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
-
+  call s:wait_for_condition(a:timeout_ms, {-> s:has_running_progress_message(a:terminal_title)})
   return s:has_running_progress_message(a:terminal_title)
 endfunction
 
@@ -246,39 +253,49 @@ function! s:has_statusline_value(expected_statusline) abort
 endfunction
 
 function! s:wait_for_statusline_value(expected_statusline, timeout_ms) abort
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    if s:has_statusline_value(a:expected_statusline)
-      return 1
-    endif
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
-
+  call s:wait_for_condition(a:timeout_ms, {-> s:has_statusline_value(a:expected_statusline)})
   return s:has_statusline_value(a:expected_statusline)
 endfunction
 
-function! s:wait_for_running_cmake_command_release(timeout_ms) abort
+function! s:active_running_cmake_command() abort
   let l:autoload_sid = s:autoload_script_sid()
   if l:autoload_sid <= 0
-    return 1
+    return ''
   endif
-
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    let l:running_command = ''
-    execute 'let l:running_command = <SNR>' . l:autoload_sid . '_active_running_cmake_command()'
-    if empty(trim(l:running_command))
-      return 1
-    endif
-
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
 
   let l:running_command = ''
   execute 'let l:running_command = <SNR>' . l:autoload_sid . '_active_running_cmake_command()'
-  return empty(trim(l:running_command))
+  return trim(l:running_command)
+endfunction
+
+function! s:has_running_cmake_terminal_job() abort
+  if !exists('*term_getstatus')
+    return 0
+  endif
+
+  for l:buffer_info in getbufinfo()
+    let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
+    if l:buffer_number <= 0
+          \ || !bufexists(l:buffer_number)
+          \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+      continue
+    endif
+    if getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+      continue
+    endif
+    if stridx(term_getstatus(l:buffer_number), 'running') >= 0
+      return 1
+    endif
+  endfor
+
+  return 0
+endfunction
+
+function! s:wait_for_running_cmake_command_release(timeout_ms) abort
+  call s:wait_for_condition(
+        \ a:timeout_ms,
+        \ {-> empty(s:active_running_cmake_command()) && !s:has_running_cmake_terminal_job()})
+  return empty(s:active_running_cmake_command()) && !s:has_running_cmake_terminal_job()
 endfunction
 
 function! s:wait_for_terminal_buffer_completion(buffer_number, timeout_ms) abort
@@ -288,17 +305,14 @@ function! s:wait_for_terminal_buffer_completion(buffer_number, timeout_ms) abort
     return 0
   endif
 
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    if stridx(term_getstatus(a:buffer_number), 'running') < 0
-      return 1
-    endif
+  call s:wait_for_condition(
+        \ a:timeout_ms,
+        \ {-> !bufexists(a:buffer_number) || stridx(term_getstatus(a:buffer_number), 'running') < 0})
+  if exists('*term_wait') && bufexists(a:buffer_number)
+    call term_wait(a:buffer_number, 10)
+  endif
 
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
-
-  return stridx(term_getstatus(a:buffer_number), 'running') < 0
+  return !bufexists(a:buffer_number) || stridx(term_getstatus(a:buffer_number), 'running') < 0
 endfunction
 
 function! s:is_window_at_bottom(window_id) abort
@@ -320,27 +334,35 @@ function! s:is_window_at_bottom(window_id) abort
   return l:is_bottom_window
 endfunction
 
-function! s:wait_for_plugin_terminal_buffer_name(buffer_name, timeout_ms) abort
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    for l:buffer_info in getbufinfo()
-      let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
-      if l:buffer_number <= 0
-            \ || !bufexists(l:buffer_number)
-            \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
-        continue
-      endif
+function! s:plugin_terminal_buffer_number_by_name(buffer_name) abort
+  let l:latest_match = -1
 
-      if bufname(l:buffer_number) ==# a:buffer_name
+  for l:buffer_info in getbufinfo()
+    let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
+    if l:buffer_number <= 0
+          \ || !bufexists(l:buffer_number)
+          \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+      continue
+    endif
+
+    if bufname(l:buffer_number) ==# a:buffer_name
+      let l:latest_match = l:buffer_number
+      if exists('*term_getstatus') && stridx(term_getstatus(l:buffer_number), 'running') >= 0
         return l:buffer_number
       endif
-    endfor
+    endif
+  endfor
 
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
+  return l:latest_match
+endfunction
 
-  return -1
+function! s:wait_for_plugin_terminal_buffer_name(buffer_name, timeout_ms) abort
+  call s:wait_for_condition(
+        \ a:timeout_ms,
+        \ {-> exists('*term_getstatus')
+        \    && s:plugin_terminal_buffer_number_by_name(a:buffer_name) > 0
+        \    && stridx(term_getstatus(s:plugin_terminal_buffer_number_by_name(a:buffer_name)), 'running') >= 0})
+  return s:plugin_terminal_buffer_number_by_name(a:buffer_name)
 endfunction
 
 function! s:quickfix_window_count() abort
@@ -435,17 +457,11 @@ function! s:terminal_buffer_non_empty_lines(buffer_number) abort
 endfunction
 
 function! s:wait_for_plugin_preview_output(fragment, timeout_ms) abort
-  let l:elapsed = 0
-  while l:elapsed < a:timeout_ms
-    let l:preview_buffer_number = s:plugin_preview_buffer_number()
-    let l:terminal_text = join(s:terminal_buffer_non_empty_lines(l:preview_buffer_number), "\n")
-    if stridx(l:terminal_text, a:fragment) >= 0
-      return 1
-    endif
-    sleep 10m
-    let l:elapsed += 10
-  endwhile
-
+  call s:wait_for_condition(a:timeout_ms, {
+        \ -> stridx(
+        \      join(s:terminal_buffer_non_empty_lines(s:plugin_preview_buffer_number()), "\n"),
+        \      a:fragment) >= 0
+        \ })
   let l:preview_buffer_number = s:plugin_preview_buffer_number()
   let l:terminal_text = join(s:terminal_buffer_non_empty_lines(l:preview_buffer_number), "\n")
   return stridx(l:terminal_text, a:fragment) >= 0
@@ -1418,7 +1434,7 @@ function! s:test_cmake_command_lock_persists_while_async_terminal_command_runs()
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
     call assert_equal('out', get(s:read_json(l:config_path), 'output', ''))
   finally
-    sleep 100m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -1668,7 +1684,7 @@ function! s:test_cmake_generate_creates_default_config_and_invokes_cmake() abort
             \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
             \ 'Expected generate command to complete.')
     else
-      sleep 200m
+      call s:wait_for_running_cmake_command_release(60000)
     endif
   finally
     let $PATH = l:initial_path
@@ -1723,7 +1739,7 @@ function! s:test_cmake_generate_uses_existing_config_values() abort
             \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),
             \ 'Expected generate command to complete.')
     else
-      sleep 200m
+      call s:wait_for_running_cmake_command_release(60000)
     endif
   finally
     let $PATH = l:initial_path
@@ -1783,6 +1799,7 @@ function! s:test_cmake_generate_opens_horizontal_terminal_with_command_output() 
           \ ['-S', l:expected_root, '-B', l:expected_build_dir, '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ s:read_non_empty_lines(l:args_path))
   finally
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -1978,7 +1995,7 @@ function! s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocat
           \ . ' \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] \[Success\]\.',
           \ l:messages)
   finally
-    sleep 100m
+    call s:wait_for_running_cmake_command_release(60000)
     let &g:statusline = l:initial_statusline
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
@@ -2252,6 +2269,7 @@ function! s:test_cmake_build_creates_default_config_and_invokes_cmake_build() ab
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
 
   try
     let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args.txt')
@@ -2262,6 +2280,7 @@ function! s:test_cmake_build_creates_default_config_and_invokes_cmake_build() ab
     call mkdir(l:deep_dir, 'p')
 
     execute 'cd ' . fnameescape(l:deep_dir)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
     execute 'silent CMakeBuild'
 
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
@@ -2271,7 +2290,13 @@ function! s:test_cmake_build_creates_default_config_and_invokes_cmake_build() ab
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
     call s:assert_cmake_build_parallel_args(s:read_non_empty_lines(l:args_path), l:expected_build_dir)
   finally
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -2285,6 +2310,7 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
@@ -2299,6 +2325,7 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
     let l:deep_dir = s:path_join(s:path_join(l:fixture.root, 'sub'), 'dir')
     call mkdir(l:deep_dir, 'p')
     execute 'cd ' . fnameescape(l:deep_dir)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
     execute 'silent CMakeBuild'
 
     let l:expected_root = s:normalized_path(l:fixture.root)
@@ -2311,7 +2338,13 @@ function! s:test_cmake_build_uses_existing_config_preset_and_target() abort
           \ '--target',
           \ 'mylib')
   finally
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
   endtry
@@ -2354,7 +2387,7 @@ function! s:test_cmake_build_sets_running_terminal_name_with_preset_and_target()
     execute 'cd ' . fnameescape(l:fixture.root)
     let &g:statusline = l:statusline_before
     call assert_true(
-          \ s:wait_for_running_cmake_command_release(3000),
+          \ s:wait_for_running_cmake_command_release(60000),
           \ 'Expected previous CMake command to finish before starting build statusline test.')
     call vim_cmake_naive#close()
     call vim_cmake_naive#build()
@@ -2442,7 +2475,7 @@ function! s:test_cmake_build_sets_running_terminal_name_on_subsequent_invocation
     let l:messages = execute('messages')
     call assert_match('\[vim-cmake-naive\] cmake build --preset=dev --target=mylib \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] \[Success\]\.', l:messages)
   finally
-    sleep 100m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -2615,7 +2648,7 @@ function! s:test_cmake_build_sets_failure_terminal_name_with_exit_code() abort
     unlet! g:vim_cmake_naive_test_last_build_terminal
     let &g:statusline = l:statusline_before
     call assert_true(
-          \ s:wait_for_running_cmake_command_release(3000),
+          \ s:wait_for_running_cmake_command_release(60000),
           \ 'Expected previous CMake command to finish before starting failed build statusline test.')
     call vim_cmake_naive#close()
     call vim_cmake_naive#build()
@@ -3106,7 +3139,9 @@ function! s:test_cmake_generate_reuses_build_output_window_in_async_mode() abort
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible build terminal window.')
     call assert_true(s:wait_for_file(l:build_args_path, 1000), 'Expected async build args file to be created.')
 
-    sleep 1200m
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:first_running_buffer_number, 3000),
+          \ 'Expected async build command to finish before generate starts.')
     call vim_cmake_naive#generate()
 
     let l:second_running_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake generate', 1000)
@@ -3114,6 +3149,9 @@ function! s:test_cmake_generate_reuses_build_output_window_in_async_mode() abort
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible generate terminal window.')
 
     call assert_true(s:wait_for_file(l:generate_args_path, 1000), 'Expected async generate args file to be created.')
+    call assert_true(
+          \ s:wait_for_terminal_buffer_completion(l:second_running_buffer_number, 30000),
+          \ 'Expected async generate command to complete.')
     let l:expected_root = s:normalized_path(l:fixture.root)
     call s:assert_cmake_build_parallel_args(
           \ s:read_non_empty_lines(l:build_args_path),
@@ -3122,7 +3160,7 @@ function! s:test_cmake_generate_reuses_build_output_window_in_async_mode() abort
           \ ['-S', l:expected_root, '-B', s:path_join(l:expected_root, 'build'), '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ s:read_non_empty_lines(l:generate_args_path))
   finally
-    sleep 2200m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -3179,7 +3217,7 @@ function! s:test_cmake_build_recreates_visible_output_window_when_reuse_not_poss
     let l:messages = execute('messages')
     call assert_true(stridx(l:messages, 'CMake: another command CMakeBuild is already running') >= 0)
   finally
-    sleep 2200m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -3319,7 +3357,7 @@ function! s:test_cmake_test_sets_running_terminal_name_with_preset() abort
     execute 'cd ' . fnameescape(l:fixture.root)
     let &g:statusline = l:statusline_before
     call assert_true(
-          \ s:wait_for_running_cmake_command_release(3000),
+          \ s:wait_for_running_cmake_command_release(60000),
           \ 'Expected previous CMake command to finish before starting test statusline test.')
     call vim_cmake_naive#close()
     call vim_cmake_naive#test()
@@ -3387,7 +3425,7 @@ function! s:test_cmake_test_sets_running_terminal_name_without_preset() abort
     call assert_true(l:running_buffer_number > 0, 'Expected running test terminal buffer.')
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible test terminal window.')
   finally
-    sleep 2200m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
@@ -3602,7 +3640,7 @@ function! s:test_cmake_run_sets_running_terminal_name_with_preset_and_target() a
     execute 'cd ' . fnameescape(l:fixture.root)
     let &g:statusline = l:statusline_before
     call assert_true(
-          \ s:wait_for_running_cmake_command_release(3000),
+          \ s:wait_for_running_cmake_command_release(60000),
           \ 'Expected previous CMake command to finish before starting run statusline test.')
     call vim_cmake_naive#close()
     call vim_cmake_naive#run()
@@ -3823,7 +3861,7 @@ function! s:test_cmake_close_closes_generate_terminal_window() abort
     call vim_cmake_naive#close()
     call assert_true(!bufexists(l:running_buffer_number), 'Expected generate terminal buffer to be closed after command completion.')
   finally
-    sleep 2200m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -3889,7 +3927,7 @@ function! s:test_cmake_close_closes_build_terminal_window() abort
     call vim_cmake_naive#close()
     call assert_true(!bufexists(l:running_buffer_number), 'Expected build terminal buffer to be closed after command completion.')
   finally
-    sleep 2200m
+    call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
       unlet! g:vim_cmake_naive_test_capture_build_terminal
@@ -3955,7 +3993,7 @@ function! s:test_cmake_show_and_hide_preview_toggle_latest_terminal_output() abo
     let g:vim_cmake_naive_test_capture_build_terminal = 0
     unlet! g:vim_cmake_naive_test_last_build_terminal
     call assert_true(
-          \ s:wait_for_running_cmake_command_release(3000),
+          \ s:wait_for_running_cmake_command_release(60000),
           \ 'Expected previous CMake command to finish before preview toggle test.')
     call vim_cmake_naive#close()
     call vim_cmake_naive#build()
