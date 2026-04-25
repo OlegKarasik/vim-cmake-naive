@@ -2704,13 +2704,14 @@ function! s:run_generate() abort
         \ l:project_root,
         \ '-B',
         \ l:generation_directory,
-        \ '--fresh',
-        \ '-DCMAKE_BUILD_TYPE=' . l:build_value
+        \ '--fresh'
         \ ]
 
   if !empty(l:preset_value)
     call add(l:argv, '--preset')
     call add(l:argv, l:preset_value)
+  else
+    call add(l:argv, '-DCMAKE_BUILD_TYPE=' . l:build_value)
   endif
 
   let l:generate_terminal_name = s:cmake_generate_terminal_running_name(l:preset_value)
