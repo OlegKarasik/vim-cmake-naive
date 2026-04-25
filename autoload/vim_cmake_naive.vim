@@ -2908,14 +2908,13 @@ function! s:active_quickfix_errorformat() abort
   return &g:errorformat
 endfunction
 
-function! s:strip_logged_command_from_quickfix_lines(quickfix_lines, logged_command_line) abort
-  let l:logged_command_line = trim(s:to_string_or_empty(a:logged_command_line))
-  if empty(l:logged_command_line) || empty(a:quickfix_lines)
+function! s:strip_logged_command_prefix_from_quickfix_lines(quickfix_lines, logged_command_line) abort
+  if empty(a:quickfix_lines) || empty(a:logged_command_line)
     return a:quickfix_lines
   endif
 
   let l:line_index = 0
-  let l:remaining_command_text = l:logged_command_line
+  let l:remaining_command_text = a:logged_command_line
   while l:line_index < len(a:quickfix_lines) && !empty(l:remaining_command_text)
     let l:line_fragment = substitute(a:quickfix_lines[l:line_index], '\s\+$', '', '')
     if stridx(l:remaining_command_text, l:line_fragment) != 0
@@ -2931,6 +2930,46 @@ function! s:strip_logged_command_from_quickfix_lines(quickfix_lines, logged_comm
   endif
 
   return a:quickfix_lines[l:line_index:]
+endfunction
+
+function! s:strip_logged_command_suffix_from_quickfix_lines(quickfix_lines, logged_command_line) abort
+  if empty(a:quickfix_lines) || empty(a:logged_command_line)
+    return a:quickfix_lines
+  endif
+
+  let l:line_index = len(a:quickfix_lines) - 1
+  let l:remaining_command_text = a:logged_command_line
+  while l:line_index >= 0 && !empty(l:remaining_command_text)
+    let l:line_fragment = substitute(a:quickfix_lines[l:line_index], '\s\+$', '', '')
+    let l:remaining_length = strlen(l:remaining_command_text)
+    let l:line_fragment_length = strlen(l:line_fragment)
+    if l:line_fragment_length > l:remaining_length
+      return a:quickfix_lines
+    endif
+
+    if strpart(l:remaining_command_text, l:remaining_length - l:line_fragment_length) !=# l:line_fragment
+      return a:quickfix_lines
+    endif
+
+    let l:remaining_command_text = strpart(l:remaining_command_text, 0, l:remaining_length - l:line_fragment_length)
+    let l:line_index -= 1
+  endwhile
+
+  if !empty(l:remaining_command_text)
+    return a:quickfix_lines
+  endif
+
+  return l:line_index >= 0 ? a:quickfix_lines[:l:line_index] : []
+endfunction
+
+function! s:strip_logged_command_from_quickfix_lines(quickfix_lines, logged_command_line) abort
+  let l:logged_command_line = trim(s:to_string_or_empty(a:logged_command_line))
+  if empty(l:logged_command_line) || empty(a:quickfix_lines)
+    return a:quickfix_lines
+  endif
+
+  let l:quickfix_lines = s:strip_logged_command_prefix_from_quickfix_lines(a:quickfix_lines, l:logged_command_line)
+  return s:strip_logged_command_suffix_from_quickfix_lines(l:quickfix_lines, l:logged_command_line)
 endfunction
 
 function! s:terminal_output_quickfix_lines(buffer_number, ...) abort
@@ -2994,7 +3033,7 @@ function! s:terminal_shell_command_with_logged_invocation(argv) abort
     let l:wrapper_argv = [
           \ 'sh',
           \ '-c',
-          \ 'printf "%s\n" "$1"; shift; exec "$@"',
+          \ 'logged_command_line="$1"; shift; "$@"; command_status="$?"; printf "\n%s\n" "$logged_command_line"; exit "$command_status"',
           \ 'vim-cmake-naive-terminal',
           \ l:logged_command_line
           \ ]

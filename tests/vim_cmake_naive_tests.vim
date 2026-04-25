@@ -174,14 +174,17 @@ function! s:shell_command_from_argv(argv) abort
   return join(map(copy(a:argv), 'shellescape(v:val)'), ' ')
 endfunction
 
-function! s:assert_terminal_output_starts_with_command(argv, terminal_lines) abort
+function! s:assert_terminal_output_ends_with_command(argv, terminal_lines) abort
   let l:expected_command_line = '[Command]: ' . s:shell_command_from_argv(a:argv)
   let l:terminal_output_flat = join(a:terminal_lines, '')
-  let l:actual_prefix = strpart(l:terminal_output_flat, 0, strlen(l:expected_command_line))
+  let l:suffix_index = strlen(l:terminal_output_flat) - strlen(l:expected_command_line)
+  let l:actual_suffix = l:suffix_index >= 0
+        \ ? strpart(l:terminal_output_flat, l:suffix_index)
+        \ : ''
   call assert_equal(
         \ l:expected_command_line,
-        \ l:actual_prefix,
-        \ 'Expected terminal output to start with executed command line.')
+        \ l:actual_suffix,
+        \ 'Expected terminal output to end with executed command line.')
 endfunction
 
 function! s:wait_for_condition(timeout_ms, Condition) abort
@@ -1816,7 +1819,7 @@ function! s:test_cmake_generate_opens_horizontal_terminal_with_command_output() 
     call assert_equal(
           \ ['-S', l:expected_root, '-B', l:expected_build_dir, '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
           \ l:generate_args)
-    call s:assert_terminal_output_starts_with_command(
+    call s:assert_terminal_output_ends_with_command(
           \ ['cmake'] + l:generate_args,
           \ get(l:terminal, 'lines', []))
   finally
@@ -2557,7 +2560,7 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_command_output() abo
     call s:assert_cmake_build_parallel_args(
           \ l:build_args,
           \ s:path_join(l:expected_root, 'build'))
-    call s:assert_terminal_output_starts_with_command(
+    call s:assert_terminal_output_ends_with_command(
           \ ['cmake'] + l:build_args,
           \ get(l:terminal, 'lines', []))
   finally
@@ -3400,7 +3403,7 @@ function! s:test_cmake_test_opens_horizontal_terminal_with_command_output() abor
     let l:test_args = s:read_non_empty_lines(l:args_path)
     call s:assert_ctest_parallel_args(l:test_args)
     call assert_equal([l:expected_test_dir], s:read_non_empty_lines(l:cwd_path))
-    call s:assert_terminal_output_starts_with_command(
+    call s:assert_terminal_output_ends_with_command(
           \ ['ctest'] + l:test_args,
           \ get(l:terminal, 'lines', []))
   finally
@@ -3810,7 +3813,7 @@ function! s:test_cmake_run_opens_horizontal_terminal_with_command_output() abort
     let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
     call assert_true(stridx(l:terminal_text, 'preview-run-line-1') >= 0)
     call assert_true(stridx(l:terminal_text, 'preview-run-line-2') >= 0)
-    call s:assert_terminal_output_starts_with_command(
+    call s:assert_terminal_output_ends_with_command(
           \ [s:normalized_path(l:script_path)],
           \ get(l:terminal, 'lines', []))
     call assert_true(s:wait_for_file(l:run_marker_path, 1000), 'Expected run preview marker file to be created.')

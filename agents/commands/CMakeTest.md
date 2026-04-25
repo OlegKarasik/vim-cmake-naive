@@ -12,8 +12,8 @@
 5. Starts asynchronous terminal command in that directory:
    1. `ctest --parallel <N>`
 6. Runs asynchronously in hidden plugin terminal buffer by default.
-7. Terminal log starts by printing the executed command line prefixed with
-   `[Command]:`.
+7. Terminal log ends by printing an empty line followed by the executed command
+   line prefixed with `[Command]:`.
 8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams test output there.
 9. While running, updates global statusline immediately with warning highlight
