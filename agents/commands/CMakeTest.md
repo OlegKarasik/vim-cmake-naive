@@ -12,11 +12,13 @@
 5. Starts asynchronous terminal command in that directory:
    1. `ctest --parallel <N>`
 6. Runs asynchronously in hidden plugin terminal buffer by default.
-7. If a plugin CMake preview window is already visible, it reuses that preview
+7. Terminal log starts by printing the executed command line prefixed with
+   `[Command]:`.
+8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams test output there.
-8. While running, updates global statusline immediately with warning highlight
+9. While running, updates global statusline immediately with warning highlight
    and terminal title plus elapsed runtime
    (for example `ctest --preset=<preset> [00:00:05]`).
-9. On completion, restores global statusline to its pre-command value and writes
+10. On completion, restores global statusline to its pre-command value and writes
    Vim message with terminal title, runtime, and `[Success]` or `[Error]`
    suffix.

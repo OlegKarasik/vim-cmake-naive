@@ -17,16 +17,18 @@
    2. adds `--preset <preset>` when preset is set
    3. adds `--target <target>` when target is set
 6. Runs asynchronously in hidden plugin terminal buffer by default.
-7. If a plugin CMake preview window is already visible, it reuses that preview
+7. Terminal log starts by printing the executed command line prefixed with
+   `[Command]:`.
+8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams build output there.
-8. While running, updates global statusline immediately with warning highlight
+9. While running, updates global statusline immediately with warning highlight
    and terminal title plus elapsed runtime
    (for example `cmake build --target=all [00:00:05]`).
-9. On completion, restores global statusline to its pre-command value and writes
+10. On completion, restores global statusline to its pre-command value and writes
    Vim message with terminal title, runtime, and `[Success]` or `[Error]`
    suffix.
-10. Clears existing quickfix entries before command execution.
-11. On failure, parses terminal output into quickfix entries:
+11. Clears existing quickfix entries before command execution.
+12. On failure, parses terminal output into quickfix entries:
    1. uses `g:vim_cmake_naive_make_errorformat` when set
    2. otherwise uses Vim `errorformat`
    3. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is

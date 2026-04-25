@@ -166,6 +166,24 @@ function! s:assert_cmake_build_parallel_args(args_lines, build_directory, ...) a
   call assert_equal(a:000, a:args_lines[4:])
 endfunction
 
+function! s:shell_command_from_argv(argv) abort
+  if type(a:argv) != v:t_list || empty(a:argv)
+    throw 'Command arguments cannot be empty.'
+  endif
+
+  return join(map(copy(a:argv), 'shellescape(v:val)'), ' ')
+endfunction
+
+function! s:assert_terminal_output_starts_with_command(argv, terminal_lines) abort
+  let l:expected_command_line = '[Command]: ' . s:shell_command_from_argv(a:argv)
+  let l:terminal_output_flat = join(a:terminal_lines, '')
+  let l:actual_prefix = strpart(l:terminal_output_flat, 0, strlen(l:expected_command_line))
+  call assert_equal(
+        \ l:expected_command_line,
+        \ l:actual_prefix,
+        \ 'Expected terminal output to start with executed command line.')
+endfunction
+
 function! s:wait_for_condition(timeout_ms, Condition) abort
   let l:timeout_ms = a:timeout_ms
   if l:timeout_ms < 0
@@ -1794,9 +1812,13 @@ function! s:test_cmake_generate_opens_horizontal_terminal_with_command_output() 
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'build')
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    let l:generate_args = s:read_non_empty_lines(l:args_path)
     call assert_equal(
           \ ['-S', l:expected_root, '-B', l:expected_build_dir, '--fresh', '-DCMAKE_BUILD_TYPE=Debug'],
-          \ s:read_non_empty_lines(l:args_path))
+          \ l:generate_args)
+    call s:assert_terminal_output_starts_with_command(
+          \ ['cmake'] + l:generate_args,
+          \ get(l:terminal, 'lines', []))
   finally
     call s:wait_for_running_cmake_command_release(60000)
     let $PATH = l:initial_path
@@ -2531,9 +2553,13 @@ function! s:test_cmake_build_opens_horizontal_terminal_with_command_output() abo
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    let l:build_args = s:read_non_empty_lines(l:args_path)
     call s:assert_cmake_build_parallel_args(
-          \ s:read_non_empty_lines(l:args_path),
+          \ l:build_args,
           \ s:path_join(l:expected_root, 'build'))
+    call s:assert_terminal_output_starts_with_command(
+          \ ['cmake'] + l:build_args,
+          \ get(l:terminal, 'lines', []))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -3320,6 +3346,80 @@ function! s:test_cmake_test_runs_ctest_in_output_preset_directory_with_preset() 
   endtry
 endfunction
 
+function! s:test_cmake_test_opens_horizontal_terminal_with_command_output() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'ctest-args-preview.txt')
+    let l:cwd_path = s:path_join(l:fixture.root, 'ctest-cwd-preview.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'ctest')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" > ' . shellescape(l:args_path),
+          \ 'pwd > ' . shellescape(l:cwd_path),
+          \ 'echo "preview-test-line-1"',
+          \ 'echo "preview-test-line-2"',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#test()
+
+    let l:terminal = s:wait_for_captured_build_terminal_output('preview-test-line-2', 1000)
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_equal(1, get(l:terminal, 'is_horizontal_split', 0))
+    call assert_equal(1, get(l:terminal, 'is_preview_window', 0))
+    call assert_true(s:is_window_at_bottom(get(l:terminal, 'winid', 0)), 'Expected test preview window at the bottom.')
+    call assert_equal(0, get(l:terminal, 'is_vertical_split', 0))
+    call assert_equal(0, get(l:terminal, 'swapfile_enabled', 1))
+    let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
+    call assert_equal(l:expected_max_height, get(l:terminal, 'max_height', 0))
+    call assert_match('^Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]$', get(l:terminal, 'buffer_name', ''))
+    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
+    call assert_true(stridx(l:terminal_text, 'preview-test-line-1') >= 0)
+    call assert_true(stridx(l:terminal_text, 'preview-test-line-2') >= 0)
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_test_dir = s:path_join(l:expected_root, 'build')
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake ctest args file to be created.')
+    call assert_true(s:wait_for_file(l:cwd_path, 1000), 'Expected fake ctest cwd file to be created.')
+    let l:test_args = s:read_non_empty_lines(l:args_path)
+    call s:assert_ctest_parallel_args(l:test_args)
+    call assert_equal([l:expected_test_dir], s:read_non_empty_lines(l:cwd_path))
+    call s:assert_terminal_output_starts_with_command(
+          \ ['ctest'] + l:test_args,
+          \ get(l:terminal, 'lines', []))
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_test_sets_running_terminal_name_with_preset() abort
   if !has('unix')
     return
@@ -3707,6 +3807,12 @@ function! s:test_cmake_run_opens_horizontal_terminal_with_command_output() abort
     let l:expected_max_height = min([10, max([1, winheight(0) / 2])])
     call assert_equal(l:expected_max_height, get(l:terminal, 'max_height', 0))
     call assert_match('^Success \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\]$', get(l:terminal, 'buffer_name', ''))
+    let l:terminal_text = join(get(l:terminal, 'lines', []), "\n")
+    call assert_true(stridx(l:terminal_text, 'preview-run-line-1') >= 0)
+    call assert_true(stridx(l:terminal_text, 'preview-run-line-2') >= 0)
+    call s:assert_terminal_output_starts_with_command(
+          \ [s:normalized_path(l:script_path)],
+          \ get(l:terminal, 'lines', []))
     call assert_true(s:wait_for_file(l:run_marker_path, 1000), 'Expected run preview marker file to be created.')
   finally
     if l:initial_capture_terminal is v:null
@@ -6915,6 +7021,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_errors_when_no_cmakelists_found()
   call s:test_cmake_test_runs_ctest_in_output_directory_without_preset()
   call s:test_cmake_test_runs_ctest_in_output_preset_directory_with_preset()
+  call s:test_cmake_test_opens_horizontal_terminal_with_command_output()
   call s:test_cmake_test_sets_running_terminal_name_with_preset()
   call s:test_cmake_test_sets_running_terminal_name_without_preset()
   call s:test_cmake_test_reuses_build_output_window_when_possible()

@@ -20,11 +20,13 @@
 6. Starts asynchronous terminal command for discovered executable in run
    directory.
 7. Runs asynchronously in hidden plugin terminal buffer by default.
-8. If a plugin CMake preview window is already visible, it reuses that preview
+8. Terminal log starts by printing the executed command line prefixed with
+   `[Command]:`.
+9. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams run output there.
-9. While running, updates global statusline immediately with warning highlight
+10. While running, updates global statusline immediately with warning highlight
    and terminal title plus elapsed runtime
    (for example `cmake run --target=<target> [00:00:05]`).
-10. On completion, restores global statusline to its pre-command value and writes
+11. On completion, restores global statusline to its pre-command value and writes
     Vim message with terminal title, runtime, and `[Success]` or `[Error]`
     suffix.

@@ -2908,21 +2908,53 @@ function! s:active_quickfix_errorformat() abort
   return &g:errorformat
 endfunction
 
-function! s:terminal_output_quickfix_lines(buffer_number) abort
-  return s:build_terminal_non_empty_lines(a:buffer_number)
+function! s:strip_logged_command_from_quickfix_lines(quickfix_lines, logged_command_line) abort
+  let l:logged_command_line = trim(s:to_string_or_empty(a:logged_command_line))
+  if empty(l:logged_command_line) || empty(a:quickfix_lines)
+    return a:quickfix_lines
+  endif
+
+  let l:line_index = 0
+  let l:remaining_command_text = l:logged_command_line
+  while l:line_index < len(a:quickfix_lines) && !empty(l:remaining_command_text)
+    let l:line_fragment = substitute(a:quickfix_lines[l:line_index], '\s\+$', '', '')
+    if stridx(l:remaining_command_text, l:line_fragment) != 0
+      return a:quickfix_lines
+    endif
+
+    let l:remaining_command_text = strpart(l:remaining_command_text, strlen(l:line_fragment))
+    let l:line_index += 1
+  endwhile
+
+  if !empty(l:remaining_command_text)
+    return a:quickfix_lines
+  endif
+
+  return a:quickfix_lines[l:line_index:]
+endfunction
+
+function! s:terminal_output_quickfix_lines(buffer_number, ...) abort
+  let l:quickfix_lines = s:build_terminal_non_empty_lines(a:buffer_number)
+  let l:logged_command_line = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
+  if empty(l:logged_command_line)
+    return l:quickfix_lines
+  endif
+
+  return s:strip_logged_command_from_quickfix_lines(l:quickfix_lines, l:logged_command_line)
 endfunction
 
 function! s:clear_quickfix_entries() abort
   call setqflist([])
 endfunction
 
-function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number) abort
+function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number, ...) abort
   let l:errorformat = trim(s:active_quickfix_errorformat())
   if empty(l:errorformat)
     return
   endif
 
-  let l:quickfix_lines = s:terminal_output_quickfix_lines(a:buffer_number)
+  let l:logged_command_line = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
+  let l:quickfix_lines = s:terminal_output_quickfix_lines(a:buffer_number, l:logged_command_line)
   try
     call setqflist([], ' ', {
           \ 'title': 'CMakeBuild',
@@ -2949,6 +2981,28 @@ function! s:shell_command_from_argv(argv) abort
   endif
 
   return join(map(copy(a:argv), 'shellescape(s:to_string_or_empty(v:val))'), ' ')
+endfunction
+
+function! s:terminal_logged_command_line(argv) abort
+  return '[Command]: ' . s:shell_command_from_argv(a:argv)
+endfunction
+
+function! s:terminal_shell_command_with_logged_invocation(argv) abort
+  let l:command_line = s:shell_command_from_argv(a:argv)
+  let l:logged_command_line = s:terminal_logged_command_line(a:argv)
+  if has('unix')
+    let l:wrapper_argv = [
+          \ 'sh',
+          \ '-c',
+          \ 'printf "%s\n" "$1"; shift; exec "$@"',
+          \ 'vim-cmake-naive-terminal',
+          \ l:logged_command_line
+          \ ]
+    call extend(l:wrapper_argv, copy(a:argv))
+    return l:wrapper_argv
+  endif
+
+  return 'echo ' . shellescape(l:logged_command_line) . ' && ' . l:command_line
 endfunction
 
 function! s:sync_makeprg_from_local_config(config_path, config) abort
@@ -3798,6 +3852,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   let l:started_at = reltime()
+  let l:logged_command_line = s:terminal_logged_command_line(a:argv)
   if !empty(l:working_directory)
     let l:working_directory = s:normalize_full_path(l:working_directory)
     if !isdirectory(l:working_directory)
@@ -3813,23 +3868,24 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_start_options.exit_cb = function(
           \ 's:on_hidden_terminal_command_exit',
-          \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at])
+          \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
   endif
   if !empty(l:terminal_name)
     call s:wipe_hidden_build_terminal_buffers_with_name(l:terminal_name)
     let l:term_start_options.term_name = l:terminal_name
   endif
+  let l:terminal_command = s:terminal_shell_command_with_logged_invocation(a:argv)
 
   try
     try
-      let l:job = term_start(copy(a:argv), l:term_start_options)
+      let l:job = term_start(l:terminal_command, l:term_start_options)
     catch /^Vim\%((\a\+)\)\=:E475:/
       if !has_key(l:term_start_options, 'term_name')
         throw v:exception
       endif
 
       call remove(l:term_start_options, 'term_name')
-      let l:job = term_start(copy(a:argv), l:term_start_options)
+      let l:job = term_start(l:terminal_command, l:term_start_options)
     endtry
   catch
     throw v:exception
@@ -3875,7 +3931,9 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
     endif
   else
     if l:populate_quickfix_on_failure
-      call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
+      call s:populate_cmake_build_quickfix_from_terminal_output(
+            \ l:terminal_buffer_number,
+            \ l:logged_command_line)
     endif
     call s:write_terminal_command_failure(
           \ l:command_name,
@@ -3977,7 +4035,7 @@ function! s:take_hidden_terminal_buffer_for_job(job) abort
   return l:buffer_number
 endfunction
 
-function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, command_name, terminal_name, started_at, job, status) abort
+function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
@@ -4004,7 +4062,9 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
       endif
     else
       if s:as_condition_bool(a:populate_quickfix_on_failure)
-        call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
+        call s:populate_cmake_build_quickfix_from_terminal_output(
+              \ l:terminal_buffer_number,
+              \ a:logged_command_line)
       endif
       call s:write_terminal_command_failure(
             \ a:command_name,
@@ -4363,6 +4423,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   let l:started_at = reltime()
+  let l:logged_command_line = s:terminal_logged_command_line(a:argv)
   let l:max_height = get(l:options, 'max_height', 0)
   if type(l:max_height) != v:t_number
     let l:max_height = str2nr(s:to_string_or_empty(l:max_height))
@@ -4377,24 +4438,25 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at])
+          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
   endif
 
   let l:term_start_options = copy(l:term_options)
   if !empty(l:terminal_name)
     let l:term_start_options.term_name = l:terminal_name
   endif
+  let l:terminal_command = s:terminal_shell_command_with_logged_invocation(a:argv)
 
   try
     try
-      let l:job = term_start(copy(a:argv), l:term_start_options)
+      let l:job = term_start(l:terminal_command, l:term_start_options)
     catch /^Vim\%((\a\+)\)\=:E475:/
       if !has_key(l:term_start_options, 'term_name')
         throw v:exception
       endif
 
       call remove(l:term_start_options, 'term_name')
-      let l:job = term_start(copy(a:argv), l:term_start_options)
+      let l:job = term_start(l:terminal_command, l:term_start_options)
     endtry
   catch
     call s:take_build_terminal_success_callback(a:window_id)
@@ -4445,7 +4507,9 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
       endif
     else
       if l:populate_quickfix_on_failure
-        call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
+        call s:populate_cmake_build_quickfix_from_terminal_output(
+              \ l:terminal_buffer_number,
+              \ l:logged_command_line)
       endif
       call s:write_terminal_command_failure(
             \ l:command_name,
@@ -4473,7 +4537,7 @@ function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) a
   call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, populate_quickfix_on_failure, command_name, terminal_name, started_at, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
@@ -4500,7 +4564,9 @@ function! s:on_build_terminal_command_exit(window_id, success_terminal_name, fai
       endif
     else
       if s:as_condition_bool(a:populate_quickfix_on_failure)
-        call s:populate_cmake_build_quickfix_from_terminal_output(l:terminal_buffer_number)
+        call s:populate_cmake_build_quickfix_from_terminal_output(
+              \ l:terminal_buffer_number,
+              \ a:logged_command_line)
       endif
       call s:write_terminal_command_failure(
             \ a:command_name,
