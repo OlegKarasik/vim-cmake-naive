@@ -34,6 +34,7 @@ Prefer the exact command-named file when prompt text mentions a command name.
 | `CMakeRun` | `agents/commands/CMakeRun.md` |
 | `CMakeShowPreview` | `agents/commands/CMakeShowPreview.md` |
 | `CMakeHidePreview` | `agents/commands/CMakeHidePreview.md` |
+| `CMakeCancel` | `agents/commands/CMakeCancel.md` |
 | `CMakeClose` | `agents/commands/CMakeClose.md` |
 | `CMakeInfo` | `agents/commands/CMakeInfo.md` |
 | `CMakeMenu` | `agents/commands/CMakeMenu.md` |

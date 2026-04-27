@@ -33,7 +33,7 @@ Local files used by the plugin:
 - **Configuration:** `:CMakeConfig`, `:CMakeConfigDefault`, `:CMakeConfigSetOutput <value>`
 - **Switching:** `:CMakeSwitchPreset`, `:CMakeSwitchBuild`, `:CMakeSwitchTarget`
 - **Workflow:** `:CMakeGenerate`, `:CMakeBuild`, `:CMakeTest`, `:CMakeRun`
-- **UI:** `:CMakeShowPreview`, `:CMakeHidePreview`, `:CMakeClose`, `:CMakeInfo`, `:CMakeMenu`, `:CMakeMenuFull`
+- **UI:** `:CMakeShowPreview`, `:CMakeHidePreview`, `:CMakeCancel`, `:CMakeClose`, `:CMakeInfo`, `:CMakeMenu`, `:CMakeMenuFull`
 
 ## `<Plug>` mappings
 

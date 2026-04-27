@@ -73,9 +73,14 @@ During startup, the plugin:
 
 ## Command Lock
 
-All public `:CMake*` commands run through a single lock. If one command is
-already running, a new command is rejected with:
+All public `:CMake*` commands except `CMakeShowPreview`, `CMakeHidePreview`,
+and `CMakeCancel` run through a single lock. If one command is already running,
+a new command is rejected with:
 `CMake: another command <CommandName> is already running`.
+
+`CMakeShowPreview` and `CMakeHidePreview` are allowed while a terminal command
+is running so preview visibility can be managed without waiting for completion.
+`CMakeCancel` is also allowed so the active terminal job can be terminated.
 
 ## Terminal Reuse
 
@@ -88,7 +93,7 @@ backend:
 4. `CMakeGenerate`
 
 By default, these commands do not open preview windows automatically. They run in
-hidden terminal buffers and update global statusline with terminal title and
+hidden terminal buffers and update global statusline with command label and
 elapsed runtime while running. On completion, statusline is restored to its
 pre-command value, and completion is reported in Vim messages with `[Success]`
 or `[Error]` suffix.

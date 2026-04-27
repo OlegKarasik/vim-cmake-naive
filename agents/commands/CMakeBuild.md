@@ -22,10 +22,10 @@
 8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams build output there.
 9. While running, updates global statusline immediately with warning highlight
-   and terminal title plus elapsed runtime
+   and command label plus elapsed runtime
    (for example `cmake build --target=all [00:00:05]`).
 10. On completion, restores global statusline to its pre-command value and writes
-   Vim message with terminal title, runtime, and `[Success]` or `[Error]`
+   Vim message with command label, runtime, and `[Success]` or `[Error]`
    suffix.
 11. Clears existing quickfix entries before command execution.
 12. On failure, parses terminal output into quickfix entries:

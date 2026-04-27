@@ -17,8 +17,8 @@
 8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams test output there.
 9. While running, updates global statusline immediately with warning highlight
-   and terminal title plus elapsed runtime
+   and command label plus elapsed runtime
    (for example `ctest --preset=<preset> [00:00:05]`).
 10. On completion, restores global statusline to its pre-command value and writes
-   Vim message with terminal title, runtime, and `[Success]` or `[Error]`
+   Vim message with command label, runtime, and `[Success]` or `[Error]`
    suffix.

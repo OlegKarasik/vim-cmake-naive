@@ -63,6 +63,7 @@ let s:cmake_menu_full_command_specs = [
       \ {'name': 'CMakeRun', 'needs_args': 0},
       \ {'name': 'CMakeShowPreview', 'needs_args': 0},
       \ {'name': 'CMakeHidePreview', 'needs_args': 0},
+      \ {'name': 'CMakeCancel', 'needs_args': 0},
       \ {'name': 'CMakeClose', 'needs_args': 0},
       \ {'name': 'CMakeInfo', 'needs_args': 0},
       \ {'name': 'CMakeMenu', 'needs_args': 0},
@@ -77,22 +78,33 @@ let s:cmake_menu_compact_command_specs = [
       \ {'name': 'CMakeSwitchPreset', 'needs_args': 0}
       \ ]
 
-function! s:any_running_cmake_terminal_job() abort
+function! s:active_running_cmake_terminal_buffer_number() abort
+  let l:most_recent_buffer_number = s:most_recent_cmake_terminal_buffer_number()
+  if s:is_terminal_buffer_job_running(l:most_recent_buffer_number)
+    return l:most_recent_buffer_number
+  endif
+
+  let l:active_buffer_number = -1
   for l:buffer_info in getbufinfo()
     let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
     if l:buffer_number <= 0
           \ || !bufexists(l:buffer_number)
           \ || getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
           \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+          \ || !s:is_terminal_buffer_job_running(l:buffer_number)
       continue
     endif
 
-    if s:is_terminal_buffer_job_running(l:buffer_number)
-      return 1
+    if l:buffer_number > l:active_buffer_number
+      let l:active_buffer_number = l:buffer_number
     endif
   endfor
 
-  return 0
+  return l:active_buffer_number
+endfunction
+
+function! s:any_running_cmake_terminal_job() abort
+  return s:active_running_cmake_terminal_buffer_number() > 0
 endfunction
 
 function! s:refresh_running_terminal_command_lock() abort
@@ -470,7 +482,7 @@ endfunction
 
 function! vim_cmake_naive#show_preview() abort
   try
-    call s:run_cmake_command('CMakeShowPreview', function('s:run_show_preview'), [])
+    call s:run_show_preview()
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -478,7 +490,15 @@ endfunction
 
 function! vim_cmake_naive#hide_preview() abort
   try
-    call s:run_cmake_command('CMakeHidePreview', function('s:run_hide_preview'), [])
+    call s:run_hide_preview()
+  catch
+    call s:write_error(s:format_exception(v:exception))
+  endtry
+endfunction
+
+function! vim_cmake_naive#cancel() abort
+  try
+    call s:run_cancel()
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -553,6 +573,7 @@ function! vim_cmake_naive#register_plug_mappings() abort
   call s:register_plug_mapping('<Plug>(CMakeRun)', ':<C-u>CMakeRun<CR>')
   call s:register_plug_mapping('<Plug>(CMakeShowPreview)', ':<C-u>CMakeShowPreview<CR>')
   call s:register_plug_mapping('<Plug>(CMakeHidePreview)', ':<C-u>CMakeHidePreview<CR>')
+  call s:register_plug_mapping('<Plug>(CMakeCancel)', ':<C-u>CMakeCancel<CR>')
   call s:register_plug_mapping('<Plug>(CMakeClose)', ':<C-u>CMakeClose<CR>')
   call s:register_plug_mapping('<Plug>(CMakeInfo)', ':<C-u>CMakeInfo<CR>')
   call s:register_plug_mapping('<Plug>(CMakeMenu)', ':<C-u>CMakeMenu<CR>')
@@ -2838,8 +2859,6 @@ function! s:run_generate() abort
         \ 'split_orientation': 'horizontal',
         \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:generate_terminal_name,
-        \ 'success_terminal_name': 'Success',
-        \ 'failure_terminal_name_prefix': 'Failure',
         \ 'command_name': 'CMakeGenerate',
         \ 'on_success_callback': function('s:on_generate_command_success', [copy(l:generate_completion_context)])
         \ })
@@ -3166,8 +3185,6 @@ function! s:run_build() abort
         \ 'split_orientation': 'horizontal',
         \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:build_terminal_name,
-        \ 'success_terminal_name': 'Success',
-        \ 'failure_terminal_name_prefix': 'Failure',
         \ 'populate_quickfix_on_failure': 1,
         \ 'command_name': 'CMakeBuild'
         \ })
@@ -3237,8 +3254,6 @@ function! s:run_test() abort
         \ 'split_orientation': 'horizontal',
         \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:test_terminal_name,
-        \ 'success_terminal_name': 'Success',
-        \ 'failure_terminal_name_prefix': 'Failure',
         \ 'command_name': 'CMakeTest',
         \ 'working_directory': l:test_directory
         \ })
@@ -3280,8 +3295,6 @@ function! s:run_run() abort
         \ 'split_orientation': 'horizontal',
         \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:run_terminal_name,
-        \ 'success_terminal_name': 'Success',
-        \ 'failure_terminal_name_prefix': 'Failure',
         \ 'command_name': 'CMakeRun',
         \ 'working_directory': l:run_directory
         \ })
@@ -3418,6 +3431,26 @@ function! s:resolve_target_executable_path(target_name, run_directory, build_val
   throw 'Executable file not found for target ''' . a:target_name . ''' under ' . l:run_directory
 endfunction
 
+function! s:run_cancel() abort
+  let l:running_buffer_number = s:active_running_cmake_terminal_buffer_number()
+  if l:running_buffer_number <= 0
+    call s:write_info('No active CMake terminal job to cancel.')
+    return
+  endif
+
+  let l:terminal_name = trim(s:to_string_or_empty(bufname(l:running_buffer_number)))
+  call s:stop_terminal_buffer_job(l:running_buffer_number)
+  if s:is_terminal_buffer_job_running(l:running_buffer_number)
+    throw 'Failed to cancel active CMake terminal job.'
+  endif
+
+  call s:refresh_running_terminal_command_lock()
+  call s:write_info(
+        \ 'Canceled active CMake terminal job: '
+        \ . (empty(l:terminal_name) ? ('#' . l:running_buffer_number) : l:terminal_name)
+        \ . '.')
+endfunction
+
 function! s:run_close() abort
   let l:closed_window_count = s:close_build_terminal_windows()
   let l:closed_buffer_count = s:close_build_terminal_hidden_buffers()
@@ -3434,6 +3467,10 @@ function! s:run_close() abort
 endfunction
 
 function! s:run_show_preview() abort
+  if &l:previewwindow && s:is_cmake_terminal_buffer(bufnr('%'))
+    return
+  endif
+
   let l:terminal_buffer_number = s:most_recent_cmake_terminal_buffer_number()
   if l:terminal_buffer_number <= 0
     throw s:cmake_missing_preview_terminal_error
@@ -3893,8 +3930,6 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
     throw 'Split orientation must be "vertical" or "horizontal".'
   endif
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
-  let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
-  let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:command_name = trim(s:to_string_or_empty(get(l:options, 'command_name', '')))
   let l:populate_quickfix_on_failure = s:as_condition_bool(get(l:options, 'populate_quickfix_on_failure', 0))
   let l:OnSuccessCallback = get(l:options, 'on_success_callback', v:null)
@@ -3917,8 +3952,6 @@ function! s:run_build_command_in_vertical_terminal(argv, ...) abort
         \ : 0
   let l:terminal_command_options = {
         \ 'terminal_name': l:terminal_name,
-        \ 'success_terminal_name': l:success_terminal_name,
-        \ 'failure_terminal_name_prefix': l:failure_terminal_name_prefix,
         \ 'command_name': l:command_name,
         \ 'populate_quickfix_on_failure': l:populate_quickfix_on_failure,
         \ 'on_success_callback': l:OnSuccessCallback,
@@ -3999,23 +4032,10 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
           \ 's:on_hidden_terminal_command_exit',
           \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
   endif
-  if !empty(l:terminal_name)
-    call s:wipe_hidden_build_terminal_buffers_with_name(l:terminal_name)
-    let l:term_start_options.term_name = l:terminal_name
-  endif
   let l:terminal_command = s:terminal_shell_command_with_logged_invocation(a:argv)
 
   try
-    try
-      let l:job = term_start(l:terminal_command, l:term_start_options)
-    catch /^Vim\%((\a\+)\)\=:E475:/
-      if !has_key(l:term_start_options, 'term_name')
-        throw v:exception
-      endif
-
-      call remove(l:term_start_options, 'term_name')
-      let l:job = term_start(l:terminal_command, l:term_start_options)
-    endtry
+    let l:job = term_start(l:terminal_command, l:term_start_options)
   catch
     throw v:exception
   endtry
@@ -4025,7 +4045,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
 
   let l:terminal_buffer_number = s:wait_for_new_terminal_buffer(
         \ l:known_terminal_buffers,
-        \ l:terminal_name,
+        \ '',
         \ 1000)
   if l:terminal_buffer_number <= 0 || !bufexists(l:terminal_buffer_number)
     throw 'Failed to resolve terminal buffer for started command.'
@@ -4035,6 +4055,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   endif
 
   call setbufvar(l:terminal_buffer_number, 'vim_cmake_naive_build_terminal', 1)
+  call setbufvar(l:terminal_buffer_number, 'vim_cmake_naive_terminal_title', l:terminal_name)
   call setbufvar(l:terminal_buffer_number, 'vim_cmake_naive_terminal_reuse_group', l:reuse_group)
   call setbufvar(l:terminal_buffer_number, 'vim_cmake_naive_build_terminal_max_height', 0)
   call setbufvar(l:terminal_buffer_number, '&bufhidden', 'hide')
@@ -4072,24 +4093,6 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   endif
 endfunction
 
-function! s:wipe_hidden_build_terminal_buffers_with_name(buffer_name) abort
-  let l:buffer_name = trim(s:to_string_or_empty(a:buffer_name))
-  if empty(l:buffer_name)
-    return
-  endif
-
-  for l:buffer_number in s:buffer_numbers_with_name(l:buffer_name)
-    if l:buffer_number <= 0
-          \ || !bufexists(l:buffer_number)
-          \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
-          \ || bufwinnr(l:buffer_number) >= 0
-      continue
-    endif
-
-    execute 'silent! bwipeout! ' . l:buffer_number
-  endfor
-endfunction
-
 function! s:terminal_buffer_numbers() abort
   let l:buffer_numbers = []
   for l:buffer_info in getbufinfo()
@@ -4102,6 +4105,31 @@ function! s:terminal_buffer_numbers() abort
   endfor
 
   return l:buffer_numbers
+endfunction
+
+function! s:plugin_terminal_buffer_number_by_title(terminal_title) abort
+  let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
+  if empty(l:terminal_title)
+    return -1
+  endif
+
+  let l:terminal_buffer_number = -1
+  for l:buffer_info in getbufinfo()
+    let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
+    if l:buffer_number <= 0
+          \ || !bufexists(l:buffer_number)
+          \ || getbufvar(l:buffer_number, '&buftype', '') !=# 'terminal'
+          \ || !getbufvar(l:buffer_number, 'vim_cmake_naive_build_terminal', 0)
+          \ || trim(s:to_string_or_empty(getbufvar(l:buffer_number, 'vim_cmake_naive_terminal_title', ''))) !=# l:terminal_title
+      continue
+    endif
+
+    if l:buffer_number > l:terminal_buffer_number
+      let l:terminal_buffer_number = l:buffer_number
+    endif
+  endfor
+
+  return l:terminal_buffer_number
 endfunction
 
 function! s:new_terminal_buffer_number_from_known(known_buffer_numbers, terminal_name) abort
@@ -4170,12 +4198,7 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
     let l:terminal_buffer_number = s:take_hidden_terminal_buffer_for_job(a:job)
     if l:terminal_buffer_number <= 0
-      let l:fallback_buffer_number = bufnr(trim(s:to_string_or_empty(a:terminal_name)))
-      if l:fallback_buffer_number > 0
-            \ && bufexists(l:fallback_buffer_number)
-            \ && getbufvar(l:fallback_buffer_number, '&buftype', '') ==# 'terminal'
-        let l:terminal_buffer_number = l:fallback_buffer_number
-      endif
+      let l:terminal_buffer_number = s:plugin_terminal_buffer_number_by_title(a:terminal_name)
     endif
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(-1, l:terminal_buffer_number)
@@ -4544,8 +4567,6 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 
   let l:terminal_name = trim(s:to_string_or_empty(get(l:options, 'terminal_name', '')))
-  let l:success_terminal_name = trim(s:to_string_or_empty(get(l:options, 'success_terminal_name', '')))
-  let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(get(l:options, 'failure_terminal_name_prefix', '')))
   let l:command_name = trim(s:to_string_or_empty(get(l:options, 'command_name', '')))
   let l:populate_quickfix_on_failure = s:as_condition_bool(get(l:options, 'populate_quickfix_on_failure', 0))
   let l:reuse_group = s:terminal_reuse_group(get(l:options, 'reuse_group', 'shared'))
@@ -4567,26 +4588,13 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:success_terminal_name, l:failure_terminal_name_prefix, l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
+          \ [a:window_id, l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
   endif
 
-  let l:term_start_options = copy(l:term_options)
-  if !empty(l:terminal_name)
-    let l:term_start_options.term_name = l:terminal_name
-  endif
   let l:terminal_command = s:terminal_shell_command_with_logged_invocation(a:argv)
 
   try
-    try
-      let l:job = term_start(l:terminal_command, l:term_start_options)
-    catch /^Vim\%((\a\+)\)\=:E475:/
-      if !has_key(l:term_start_options, 'term_name')
-        throw v:exception
-      endif
-
-      call remove(l:term_start_options, 'term_name')
-      let l:job = term_start(l:terminal_command, l:term_start_options)
-    endtry
+    let l:job = term_start(l:terminal_command, l:term_options)
   catch
     call s:take_build_terminal_success_callback(a:window_id)
     throw v:exception
@@ -4599,6 +4607,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   call s:disable_swapfile_for_current_buffer()
   let l:terminal_buffer_number = bufnr('%')
   let b:vim_cmake_naive_build_terminal = 1
+  let b:vim_cmake_naive_terminal_title = l:terminal_name
   let b:vim_cmake_naive_terminal_reuse_group = l:reuse_group
   let &l:bufhidden = 'hide'
   if l:max_height > 0
@@ -4607,7 +4616,6 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
     unlet! b:vim_cmake_naive_build_terminal_max_height
   endif
   call s:remember_last_cmake_terminal_buffer(l:terminal_buffer_number)
-  call s:set_running_terminal_name(a:window_id, l:terminal_name, l:terminal_buffer_number)
   call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
   if !s:should_capture_build_terminal_for_tests()
     call s:hold_running_cmake_command_lock(l:command_name, 'terminal', l:terminal_name)
@@ -4615,17 +4623,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
     let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
-    call s:set_terminal_name_for_window(
-          \ a:window_id,
-          \ s:terminal_completion_name(
-          \   l:exit_code,
-          \   l:success_terminal_name,
-          \   l:failure_terminal_name_prefix,
-          \   l:duration_seconds))
-    let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
-    if l:terminal_buffer_number > 0
-      call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
-    endif
+    call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
     let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
     if l:exit_code == 0
       if s:invoke_terminal_success_callback(l:OnSuccessCallback)
@@ -4649,35 +4647,10 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 endfunction
 
-function! s:set_running_terminal_name(window_id, terminal_name, buffer_number) abort
-  let l:terminal_name = trim(s:to_string_or_empty(a:terminal_name))
-  if empty(l:terminal_name)
-    return
-  endif
-
-  call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
-  if a:buffer_number <= 0 || !bufexists(a:buffer_number) || bufname(a:buffer_number) ==# l:terminal_name
-    return
-  endif
-
-  if exists('*term_wait') && s:is_terminal_buffer_job_running(a:buffer_number)
-    call term_wait(a:buffer_number, 10)
-  endif
-  call s:set_terminal_name_for_window(a:window_id, l:terminal_name)
-endfunction
-
-function! s:on_build_terminal_command_exit(window_id, success_terminal_name, failure_terminal_name_prefix, populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
-    call s:set_terminal_name_for_window(
-          \ a:window_id,
-          \ s:terminal_completion_name(
-          \   l:exit_code,
-          \   a:success_terminal_name,
-          \   a:failure_terminal_name_prefix,
-          \   l:duration_seconds))
-
     let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
@@ -4810,29 +4783,6 @@ function! s:write_terminal_command_failure(command_name, exit_code, elapsed_seco
         \ . ').')
 endfunction
 
-function! s:terminal_completion_name(exit_code, success_terminal_name, failure_terminal_name_prefix, elapsed_seconds) abort
-  let l:success_terminal_name = trim(s:to_string_or_empty(a:success_terminal_name))
-  if a:exit_code == 0
-    if empty(l:success_terminal_name)
-      return ''
-    endif
-
-    return l:success_terminal_name . ' ' . s:format_elapsed_runtime(a:elapsed_seconds)
-  endif
-
-  let l:failure_terminal_name_prefix = trim(s:to_string_or_empty(a:failure_terminal_name_prefix))
-  if empty(l:failure_terminal_name_prefix)
-    return ''
-  endif
-
-  return l:failure_terminal_name_prefix
-        \ . ' '
-        \ . s:format_elapsed_runtime(a:elapsed_seconds)
-        \ . ' ('
-        \ . a:exit_code
-        \ . ')'
-endfunction
-
 function! s:terminal_buffer_number_for_window(window_id) abort
   let l:window_number = win_id2win(a:window_id)
   if l:window_number <= 0
@@ -4840,54 +4790,6 @@ function! s:terminal_buffer_number_for_window(window_id) abort
   endif
 
   return winbufnr(l:window_number)
-endfunction
-
-function! s:buffer_numbers_with_name(buffer_name) abort
-  let l:buffer_numbers = []
-  for l:buffer_info in getbufinfo()
-    let l:buffer_number = get(l:buffer_info, 'bufnr', -1)
-    if l:buffer_number > 0 && bufname(l:buffer_number) ==# a:buffer_name
-      call add(l:buffer_numbers, l:buffer_number)
-    endif
-  endfor
-
-  return l:buffer_numbers
-endfunction
-
-function! s:set_terminal_name_for_window(window_id, terminal_name) abort
-  let l:terminal_name = trim(s:to_string_or_empty(a:terminal_name))
-  if empty(l:terminal_name) || win_id2win(a:window_id) <= 0
-    return
-  endif
-
-  let l:origin_window_id = win_getid()
-  if !win_gotoid(a:window_id)
-    return
-  endif
-
-  try
-    let l:current_buffer_number = bufnr('%')
-    for l:conflicting_buffer_number in s:buffer_numbers_with_name(l:terminal_name)
-      if l:conflicting_buffer_number == l:current_buffer_number
-        continue
-      endif
-
-      if !getbufvar(l:conflicting_buffer_number, 'vim_cmake_naive_build_terminal', 0)
-            \ || bufwinnr(l:conflicting_buffer_number) >= 0
-        return
-      endif
-
-      execute 'silent! bwipeout! ' . l:conflicting_buffer_number
-    endfor
-
-    call s:disable_swapfile_for_current_buffer()
-    execute 'silent file ' . fnameescape(l:terminal_name)
-    let b:vim_cmake_naive_build_terminal = 1
-  finally
-    if win_id2win(l:origin_window_id) > 0
-      call win_gotoid(l:origin_window_id)
-    endif
-  endtry
 endfunction
 
 function! s:terminal_job_exit_code(job, status) abort

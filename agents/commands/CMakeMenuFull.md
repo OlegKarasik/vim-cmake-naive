@@ -17,11 +17,12 @@
    9. `CMakeRun`
    10. `CMakeShowPreview`
    11. `CMakeHidePreview`
-   12. `CMakeClose`
-   13. `CMakeInfo`
-   14. `CMakeMenu`
-   15. `CMakeMenuFull`
-   16. `CMakeConfigSetOutput`
+   12. `CMakeCancel`
+   13. `CMakeClose`
+   14. `CMakeInfo`
+   15. `CMakeMenu`
+   16. `CMakeMenuFull`
+   17. `CMakeConfigSetOutput`
 2. Uses Command Menu popup when popup support exists; otherwise list/menu fallback.
 3. Only commands that currently exist in Vim are shown.
 4. For commands requiring args (`CMakeConfigSetOutput`), prompts:
