@@ -3017,6 +3017,67 @@ function! s:active_quickfix_errorformat() abort
   return &g:errorformat
 endfunction
 
+function! s:is_cxx_diagnostic_quickfix_line(line) abort
+  let l:line = trim(s:to_string_or_empty(a:line))
+  return l:line =~# '^\S.\{-}:\d\+:\d\+:\s\+\%(fatal error\|error\|warning\|note\):\s\+.\+'
+endfunction
+
+function! s:is_cxx_diagnostic_quickfix_fragment(line) abort
+  let l:line = trim(s:to_string_or_empty(a:line))
+  if empty(l:line)
+    return 0
+  endif
+  if l:line =~# '\s' || l:line =~# ':\d\+:\d\+:'
+    return 0
+  endif
+
+  return l:line =~# '[\/\\.]'
+endfunction
+
+function! s:merge_wrapped_cxx_diagnostic_quickfix_lines(quickfix_lines) abort
+  if empty(a:quickfix_lines)
+    return []
+  endif
+
+  let l:normalized_lines = []
+  let l:line_count = len(a:quickfix_lines)
+  let l:line_index = 0
+  while l:line_index < l:line_count
+    let l:line = s:to_string_or_empty(get(a:quickfix_lines, l:line_index, ''))
+    if s:is_cxx_diagnostic_quickfix_line(l:line)
+      call add(l:normalized_lines, l:line)
+      let l:line_index += 1
+      continue
+    endif
+
+    let l:merged_line = ''
+    if s:is_cxx_diagnostic_quickfix_fragment(l:line)
+      let l:candidate = l:line
+      let l:max_scan_index = min([l:line_count - 1, l:line_index + 10])
+      let l:scan_index = l:line_index + 1
+      while l:scan_index <= l:max_scan_index
+        let l:candidate .= s:to_string_or_empty(get(a:quickfix_lines, l:scan_index, ''))
+        if s:is_cxx_diagnostic_quickfix_line(l:candidate)
+          let l:merged_line = l:candidate
+          break
+        endif
+        let l:scan_index += 1
+      endwhile
+    endif
+
+    if !empty(l:merged_line)
+      call add(l:normalized_lines, l:merged_line)
+      let l:line_index = l:scan_index + 1
+      continue
+    endif
+
+    call add(l:normalized_lines, l:line)
+    let l:line_index += 1
+  endwhile
+
+  return l:normalized_lines
+endfunction
+
 function! s:strip_logged_command_prefix_from_quickfix_lines(quickfix_lines, logged_command_line) abort
   if empty(a:quickfix_lines) || empty(a:logged_command_line)
     return a:quickfix_lines
@@ -3084,11 +3145,11 @@ endfunction
 function! s:terminal_output_quickfix_lines(buffer_number, ...) abort
   let l:quickfix_lines = s:build_terminal_non_empty_lines(a:buffer_number)
   let l:logged_command_line = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
-  if empty(l:logged_command_line)
-    return l:quickfix_lines
+  if !empty(l:logged_command_line)
+    let l:quickfix_lines = s:strip_logged_command_from_quickfix_lines(l:quickfix_lines, l:logged_command_line)
   endif
 
-  return s:strip_logged_command_from_quickfix_lines(l:quickfix_lines, l:logged_command_line)
+  return s:merge_wrapped_cxx_diagnostic_quickfix_lines(l:quickfix_lines)
 endfunction
 
 function! s:clear_quickfix_entries() abort

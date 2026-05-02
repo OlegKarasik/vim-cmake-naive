@@ -100,6 +100,26 @@ function! s:create_fake_cmake_script_with_build_error(root, args_output_path, ex
   return l:bin_dir
 endfunction
 
+function! s:create_fake_cmake_script_with_wrapped_cxx_build_error(root, args_output_path, error_file_path, exit_code) abort
+  let l:bin_dir = s:path_join(a:root, 'fake-bin')
+  call mkdir(l:bin_dir, 'p')
+  let l:script_path = s:path_join(l:bin_dir, 'cmake')
+  let l:error_path = substitute(fnamemodify(a:error_file_path, ':p'), '\\', '/', 'g')
+  let l:split_index = max([1, strlen(l:error_path) - 4])
+  let l:error_prefix = strpart(l:error_path, 0, l:split_index)
+  let l:error_suffix = strpart(l:error_path, l:split_index)
+  let l:error_tail = l:error_suffix . ':59:1: error: unknown type name ''a'''
+  call writefile([
+        \ '#!/bin/sh',
+        \ 'printf "%s\n" "$@" > ' . shellescape(a:args_output_path),
+        \ 'printf "%s\n" ' . shellescape(l:error_prefix) . ' >&2',
+        \ 'printf "%s\n" ' . shellescape(l:error_tail) . ' >&2',
+        \ 'exit ' . string(a:exit_code)
+        \ ], l:script_path, 'b')
+  call system('chmod +x ' . shellescape(l:script_path))
+  return l:bin_dir
+endfunction
+
 function! s:create_fake_ctest_script(root, args_output_path, cwd_output_path, exit_code) abort
   let l:bin_dir = s:path_join(a:root, 'fake-bin')
   call mkdir(l:bin_dir, 'p')
@@ -2908,6 +2928,79 @@ function! s:test_cmake_build_populates_quickfix_on_failure() abort
     call assert_equal(3, get(l:quickfix[0], 'lnum', 0))
     call assert_equal(7, get(l:quickfix[0], 'col', 0))
     call assert_true(stridx(get(l:quickfix[0], 'text', ''), 'build backend failure') >= 0)
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    if l:initial_make_errorformat is v:null
+      unlet! g:vim_cmake_naive_make_errorformat
+    else
+      let g:vim_cmake_naive_make_errorformat = l:initial_make_errorformat
+    endif
+    silent! cclose
+    call setqflist([])
+    call vim_cmake_naive#close()
+    execute 'silent keepalt enew'
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_build_populates_quickfix_for_wrapped_cxx_error_path() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+  let l:initial_make_errorformat = get(g:, 'vim_cmake_naive_make_errorformat', v:null)
+
+  try
+    let l:error_file_path = s:path_join(l:fixture.root, 'src/apsp/src/variants/09/algorithm.hpp')
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-quickfix-wrapped-cxx-error.txt')
+    let l:bin_dir = s:create_fake_cmake_script_with_wrapped_cxx_build_error(
+          \ l:fixture.root,
+          \ l:args_path,
+          \ l:error_file_path,
+          \ 2)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %trror: %m'
+    call mkdir(fnamemodify(l:error_file_path, ':h'), 'p')
+    call writefile(['#pragma once'], l:error_file_path, 'b')
+    call setqflist([])
+    silent! cclose
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:terminal = s:wait_for_captured_build_terminal_output('unknown type name', 1000)
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+
+    let l:quickfix = getqflist()
+    call assert_true(len(l:quickfix) > 0, 'Expected wrapped C++ diagnostic to populate quickfix list.')
+    call assert_equal(59, get(l:quickfix[0], 'lnum', 0))
+    call assert_equal(1, get(l:quickfix[0], 'col', 0))
+    call assert_true(stridx(get(l:quickfix[0], 'text', ''), "unknown type name 'a'") >= 0)
+    let l:quickfix_file_path = get(l:quickfix[0], 'filename', '')
+    if empty(l:quickfix_file_path)
+      let l:quickfix_file_path = bufname(get(l:quickfix[0], 'bufnr', -1))
+    endif
+    call assert_true(!empty(l:quickfix_file_path), 'Expected wrapped C++ diagnostic quickfix entry to include a filename.')
+    call assert_equal(s:normalized_path(l:error_file_path), s:normalized_path(l:quickfix_file_path))
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -7268,6 +7361,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_output()
   call s:test_cmake_build_sets_failure_terminal_name_with_exit_code()
   call s:test_cmake_build_populates_quickfix_on_failure()
+  call s:test_cmake_build_populates_quickfix_for_wrapped_cxx_error_path()
   call s:test_cmake_build_clears_quickfix_before_execution()
   call s:test_cmake_build_failure_opens_quickfix_when_enabled()
   call s:test_cmake_build_reuses_visible_output_window_when_possible()
