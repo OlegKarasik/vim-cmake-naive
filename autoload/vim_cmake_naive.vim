@@ -33,6 +33,8 @@ let s:build_terminal_buffer_name = '[vim-cmake-naive-build]'
 let s:last_cmake_terminal_windows_by_group = {}
 let s:build_terminal_success_callbacks = {}
 let s:hidden_terminal_buffer_numbers_by_job = {}
+let s:terminal_output_capture_lines_by_key = {}
+let s:terminal_output_capture_sequence = 0
 let s:last_cmake_terminal_buffer_number = -1
 let s:running_cmake_command_name = ''
 let s:keep_running_cmake_command_lock = 0
@@ -3017,67 +3019,6 @@ function! s:active_quickfix_errorformat() abort
   return &g:errorformat
 endfunction
 
-function! s:is_cxx_diagnostic_quickfix_line(line) abort
-  let l:line = trim(s:to_string_or_empty(a:line))
-  return l:line =~# '^\S.\{-}:\d\+:\d\+:\s\+\%(fatal error\|error\|warning\|note\):\s\+.\+'
-endfunction
-
-function! s:is_cxx_diagnostic_quickfix_fragment(line) abort
-  let l:line = trim(s:to_string_or_empty(a:line))
-  if empty(l:line)
-    return 0
-  endif
-  if l:line =~# '\s' || l:line =~# ':\d\+:\d\+:'
-    return 0
-  endif
-
-  return l:line =~# '[\/\\.]'
-endfunction
-
-function! s:merge_wrapped_cxx_diagnostic_quickfix_lines(quickfix_lines) abort
-  if empty(a:quickfix_lines)
-    return []
-  endif
-
-  let l:normalized_lines = []
-  let l:line_count = len(a:quickfix_lines)
-  let l:line_index = 0
-  while l:line_index < l:line_count
-    let l:line = s:to_string_or_empty(get(a:quickfix_lines, l:line_index, ''))
-    if s:is_cxx_diagnostic_quickfix_line(l:line)
-      call add(l:normalized_lines, l:line)
-      let l:line_index += 1
-      continue
-    endif
-
-    let l:merged_line = ''
-    if s:is_cxx_diagnostic_quickfix_fragment(l:line)
-      let l:candidate = l:line
-      let l:max_scan_index = min([l:line_count - 1, l:line_index + 10])
-      let l:scan_index = l:line_index + 1
-      while l:scan_index <= l:max_scan_index
-        let l:candidate .= s:to_string_or_empty(get(a:quickfix_lines, l:scan_index, ''))
-        if s:is_cxx_diagnostic_quickfix_line(l:candidate)
-          let l:merged_line = l:candidate
-          break
-        endif
-        let l:scan_index += 1
-      endwhile
-    endif
-
-    if !empty(l:merged_line)
-      call add(l:normalized_lines, l:merged_line)
-      let l:line_index = l:scan_index + 1
-      continue
-    endif
-
-    call add(l:normalized_lines, l:line)
-    let l:line_index += 1
-  endwhile
-
-  return l:normalized_lines
-endfunction
-
 function! s:strip_logged_command_prefix_from_quickfix_lines(quickfix_lines, logged_command_line) abort
   if empty(a:quickfix_lines) || empty(a:logged_command_line)
     return a:quickfix_lines
@@ -3143,13 +3084,18 @@ function! s:strip_logged_command_from_quickfix_lines(quickfix_lines, logged_comm
 endfunction
 
 function! s:terminal_output_quickfix_lines(buffer_number, ...) abort
-  let l:quickfix_lines = s:build_terminal_non_empty_lines(a:buffer_number)
   let l:logged_command_line = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
+  let l:captured_output_lines = a:0 > 1 && type(a:2) == v:t_list
+        \ ? filter(copy(a:2), '!empty(trim(s:to_string_or_empty(v:val)))')
+        \ : []
+  let l:quickfix_lines = !empty(l:captured_output_lines)
+        \ ? l:captured_output_lines
+        \ : s:build_terminal_non_empty_lines(a:buffer_number)
   if !empty(l:logged_command_line)
     let l:quickfix_lines = s:strip_logged_command_from_quickfix_lines(l:quickfix_lines, l:logged_command_line)
   endif
 
-  return s:merge_wrapped_cxx_diagnostic_quickfix_lines(l:quickfix_lines)
+  return l:quickfix_lines
 endfunction
 
 function! s:clear_quickfix_entries() abort
@@ -3163,7 +3109,11 @@ function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number, ..
   endif
 
   let l:logged_command_line = trim(a:0 > 0 ? s:to_string_or_empty(a:1) : '')
-  let l:quickfix_lines = s:terminal_output_quickfix_lines(a:buffer_number, l:logged_command_line)
+  let l:captured_output_lines = a:0 > 1 && type(a:2) == v:t_list ? copy(a:2) : []
+  let l:quickfix_lines = s:terminal_output_quickfix_lines(
+        \ a:buffer_number,
+        \ l:logged_command_line,
+        \ l:captured_output_lines)
   try
     call setqflist([], ' ', {
           \ 'title': 'CMakeBuild',
@@ -3518,6 +3468,8 @@ function! s:run_close() abort
   call s:reset_previous_build_terminal_window()
   let s:build_terminal_success_callbacks = {}
   let s:hidden_terminal_buffer_numbers_by_job = {}
+  let s:terminal_output_capture_lines_by_key = {}
+  let s:terminal_output_capture_sequence = 0
   let s:last_cmake_terminal_buffer_number = -1
   call s:write_info(
         \ 'Closed build terminals: '
@@ -4076,6 +4028,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   let l:started_at = reltime()
   let l:logged_command_line = s:terminal_logged_command_line(a:argv)
+  let l:output_capture_key = s:begin_terminal_output_capture()
   if !empty(l:working_directory)
     let l:working_directory = s:normalize_full_path(l:working_directory)
     if !isdirectory(l:working_directory)
@@ -4084,6 +4037,8 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   endif
 
   let l:term_start_options = {'hidden': 1}
+  let l:term_start_options.out_cb = function('s:on_terminal_command_stdout', [l:output_capture_key])
+  let l:term_start_options.err_cb = function('s:on_terminal_command_stderr', [l:output_capture_key])
   let l:known_terminal_buffers = s:terminal_buffer_numbers()
   if !empty(l:working_directory)
     let l:term_start_options.cwd = l:working_directory
@@ -4091,16 +4046,18 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_start_options.exit_cb = function(
           \ 's:on_hidden_terminal_command_exit',
-          \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
+          \ [l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line, l:output_capture_key])
   endif
   let l:terminal_command = s:terminal_shell_command_with_logged_invocation(a:argv)
 
   try
     let l:job = term_start(l:terminal_command, l:term_start_options)
   catch
+    call s:take_terminal_output_capture_lines(l:output_capture_key)
     throw v:exception
   endtry
   if type(l:job) != v:t_number || l:job <= 0
+    call s:take_terminal_output_capture_lines(l:output_capture_key)
     throw 'Failed to start build command in terminal buffer.'
   endif
 
@@ -4131,6 +4088,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
 
   let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
   let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
+  let l:captured_output_lines = s:take_terminal_output_capture_lines(l:output_capture_key)
   call s:capture_build_terminal_for_tests(-1, l:terminal_buffer_number)
   let l:OnSuccessCallback = s:take_build_terminal_success_callback(l:terminal_buffer_number, 1)
   if l:exit_code == 0
@@ -4144,7 +4102,8 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
     if l:populate_quickfix_on_failure
       call s:populate_cmake_build_quickfix_from_terminal_output(
             \ l:terminal_buffer_number,
-            \ l:logged_command_line)
+            \ l:logged_command_line,
+            \ l:captured_output_lines)
     endif
     call s:write_terminal_command_failure(
           \ l:command_name,
@@ -4253,10 +4212,69 @@ function! s:take_hidden_terminal_buffer_for_job(job) abort
   return l:buffer_number
 endfunction
 
-function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, job, status) abort
+function! s:new_terminal_output_capture_key() abort
+  let s:terminal_output_capture_sequence += 1
+  return string(s:terminal_output_capture_sequence)
+endfunction
+
+function! s:begin_terminal_output_capture() abort
+  let l:key = s:new_terminal_output_capture_key()
+  let s:terminal_output_capture_lines_by_key[l:key] = []
+  return l:key
+endfunction
+
+function! s:append_terminal_output_capture_lines(capture_key, payload) abort
+  if !has_key(s:terminal_output_capture_lines_by_key, a:capture_key)
+    return
+  endif
+
+  if type(a:payload) == v:t_list
+    for l:item in a:payload
+      call s:append_terminal_output_capture_lines(a:capture_key, l:item)
+    endfor
+    return
+  endif
+
+  let l:text = substitute(s:to_string_or_empty(a:payload), '\r', '', 'g')
+  if empty(l:text)
+    return
+  endif
+
+  for l:line in split(l:text, '\n', 1)
+    if empty(trim(l:line))
+      continue
+    endif
+    call add(s:terminal_output_capture_lines_by_key[a:capture_key], l:line)
+  endfor
+endfunction
+
+function! s:on_terminal_command_stdout(capture_key, channel, payload) abort
+  call s:append_terminal_output_capture_lines(a:capture_key, a:payload)
+endfunction
+
+function! s:on_terminal_command_stderr(capture_key, channel, payload) abort
+  call s:append_terminal_output_capture_lines(a:capture_key, a:payload)
+endfunction
+
+function! s:take_terminal_output_capture_lines(capture_key) abort
+  let l:key = trim(s:to_string_or_empty(a:capture_key))
+  if empty(l:key)
+    return []
+  endif
+
+  let l:captured_output_lines = get(s:terminal_output_capture_lines_by_key, l:key, [])
+  if has_key(s:terminal_output_capture_lines_by_key, l:key)
+    call remove(s:terminal_output_capture_lines_by_key, l:key)
+  endif
+
+  return type(l:captured_output_lines) == v:t_list ? copy(l:captured_output_lines) : []
+endfunction
+
+function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, output_capture_key, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
+    let l:captured_output_lines = s:take_terminal_output_capture_lines(a:output_capture_key)
     let l:terminal_buffer_number = s:take_hidden_terminal_buffer_for_job(a:job)
     if l:terminal_buffer_number <= 0
       let l:terminal_buffer_number = s:plugin_terminal_buffer_number_by_title(a:terminal_name)
@@ -4277,7 +4295,8 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
       if s:as_condition_bool(a:populate_quickfix_on_failure)
         call s:populate_cmake_build_quickfix_from_terminal_output(
               \ l:terminal_buffer_number,
-              \ a:logged_command_line)
+              \ a:logged_command_line,
+              \ l:captured_output_lines)
       endif
       call s:write_terminal_command_failure(
             \ a:command_name,
@@ -4635,12 +4654,15 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   let l:working_directory = trim(s:to_string_or_empty(get(l:options, 'working_directory', '')))
   let l:started_at = reltime()
   let l:logged_command_line = s:terminal_logged_command_line(a:argv)
+  let l:output_capture_key = s:begin_terminal_output_capture()
   let l:max_height = get(l:options, 'max_height', 0)
   if type(l:max_height) != v:t_number
     let l:max_height = str2nr(s:to_string_or_empty(l:max_height))
   endif
 
   let l:term_options = {'curwin': 1}
+  let l:term_options.out_cb = function('s:on_terminal_command_stdout', [l:output_capture_key])
+  let l:term_options.err_cb = function('s:on_terminal_command_stderr', [l:output_capture_key])
   call s:disable_swapfile_for_current_buffer()
   call s:set_build_terminal_success_callback(a:window_id, l:OnSuccessCallback)
   if !empty(l:working_directory)
@@ -4649,7 +4671,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if !s:should_capture_build_terminal_for_tests()
     let l:term_options.exit_cb = function(
           \ 's:on_build_terminal_command_exit',
-          \ [a:window_id, l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line])
+          \ [a:window_id, l:populate_quickfix_on_failure, l:command_name, l:terminal_name, l:started_at, l:logged_command_line, l:output_capture_key])
   endif
 
   let l:terminal_command = s:terminal_shell_command_with_logged_invocation(a:argv)
@@ -4657,10 +4679,12 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   try
     let l:job = term_start(l:terminal_command, l:term_options)
   catch
+    call s:take_terminal_output_capture_lines(l:output_capture_key)
     call s:take_build_terminal_success_callback(a:window_id)
     throw v:exception
   endtry
   if type(l:job) != v:t_number || l:job <= 0
+    call s:take_terminal_output_capture_lines(l:output_capture_key)
     call s:take_build_terminal_success_callback(a:window_id)
     throw 'Failed to start build command in terminal window.'
   endif
@@ -4684,6 +4708,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   if s:should_capture_build_terminal_for_tests()
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
     let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
+    let l:captured_output_lines = s:take_terminal_output_capture_lines(l:output_capture_key)
     call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
     let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
     if l:exit_code == 0
@@ -4697,7 +4722,8 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
       if l:populate_quickfix_on_failure
         call s:populate_cmake_build_quickfix_from_terminal_output(
               \ l:terminal_buffer_number,
-              \ l:logged_command_line)
+              \ l:logged_command_line,
+              \ l:captured_output_lines)
       endif
       call s:write_terminal_command_failure(
             \ l:command_name,
@@ -4708,10 +4734,11 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 endfunction
 
-function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, job, status) abort
+function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failure, command_name, terminal_name, started_at, logged_command_line, output_capture_key, job, status) abort
   try
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
+    let l:captured_output_lines = s:take_terminal_output_capture_lines(a:output_capture_key)
     let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
@@ -4729,7 +4756,8 @@ function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failu
       if s:as_condition_bool(a:populate_quickfix_on_failure)
         call s:populate_cmake_build_quickfix_from_terminal_output(
               \ l:terminal_buffer_number,
-              \ a:logged_command_line)
+              \ a:logged_command_line,
+              \ l:captured_output_lines)
       endif
       call s:write_terminal_command_failure(
             \ a:command_name,
