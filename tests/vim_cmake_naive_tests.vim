@@ -2925,6 +2925,10 @@ function! s:test_cmake_build_populates_quickfix_on_failure() abort
 
     let l:quickfix = getqflist()
     call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to contain entries from failed CMakeBuild output.')
+    call assert_equal(
+          \ 0,
+          \ len(filter(copy(l:quickfix), '!get(v:val, "valid", 0)')),
+          \ 'Expected quickfix list to exclude non-diagnostic build output lines.')
     call assert_equal(3, get(l:quickfix[0], 'lnum', 0))
     call assert_equal(7, get(l:quickfix[0], 'col', 0))
     call assert_true(stridx(get(l:quickfix[0], 'text', ''), 'build backend failure') >= 0)
@@ -2991,6 +2995,10 @@ function! s:test_cmake_build_populates_quickfix_for_error_after_many_output_line
 
     let l:quickfix = getqflist()
     call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to include diagnostics that appear after many build output lines.')
+    call assert_equal(
+          \ 0,
+          \ len(filter(copy(l:quickfix), '!get(v:val, "valid", 0)')),
+          \ 'Expected quickfix list to exclude non-diagnostic build output lines.')
     let l:matches = filter(
           \ copy(l:quickfix),
           \ 'get(v:val, "lnum", 0) == 603'

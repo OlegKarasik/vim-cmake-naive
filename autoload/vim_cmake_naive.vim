@@ -3125,7 +3125,18 @@ function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number, ..
     return
   endtry
 
-  if s:should_open_quickfix_on_make_error() && len(getqflist()) > 0
+  let l:parsed_quickfix_entries = getqflist()
+  let l:quickfix_entries = filter(copy(l:parsed_quickfix_entries), 'get(v:val, ''valid'', 0)')
+  if len(l:quickfix_entries) != len(l:parsed_quickfix_entries)
+    try
+      call setqflist(l:quickfix_entries, 'r')
+    catch
+      call s:write_error('Failed to filter quickfix entries from CMakeBuild output: ' . s:format_exception(v:exception))
+      return
+    endtry
+  endif
+
+  if s:should_open_quickfix_on_make_error() && len(l:quickfix_entries) > 0
     silent copen
   endif
 endfunction
