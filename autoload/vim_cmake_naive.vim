@@ -1086,6 +1086,15 @@ function! s:read_split_worker_result_payload_with_retry(result_path, timeout_ms)
   throw l:last_read_error
 endfunction
 
+function! s:is_split_worker_result_missing_error(message) abort
+  let l:message = trim(s:to_string_or_empty(a:message))
+  return !empty(l:message)
+        \ && (
+        \   stridx(l:message, 'Split worker result file not found:') >= 0
+        \   || stridx(l:message, 'Failed to read split worker result file:') >= 0
+        \ )
+endfunction
+
 function! s:split_result_from_worker_payload(worker_payload) abort
   if type(a:worker_payload) != v:t_dict
     throw 'Split worker result payload must be a JSON object.'
@@ -1116,8 +1125,12 @@ function! s:run_split_via_worker_sync(options) abort
         \ ? str2nr(s:to_string_or_empty(get(l:wait_status, 0, -3)))
         \ : -3
   try
-    let l:worker_payload = s:read_split_worker_result_payload_with_retry(l:worker_job_context.result_path, 1000)
+    let l:worker_payload = s:read_split_worker_result_payload_with_retry(l:worker_job_context.result_path, 5000)
   catch
+    let l:worker_error = s:format_exception(v:exception)
+    if l:wait_code == 0 && s:is_split_worker_result_missing_error(l:worker_error)
+      return s:split_compile_commands(a:options)
+    endif
     if l:wait_code == -1
       throw 'Split worker job timed out.'
     endif
@@ -1130,7 +1143,7 @@ function! s:run_split_via_worker_sync(options) abort
     if l:wait_code != 0
       throw 'Split worker job failed with exit code ' . l:wait_code . '.'
     endif
-    throw v:exception
+    throw l:worker_error
   finally
     call s:cleanup_split_worker_files(
           \ get(l:worker_job_context, 'request_path', ''),
@@ -3330,10 +3343,26 @@ function! s:on_generate_split_job_exit(split_job_key, job, status) abort
       return
     endif
 
-    let l:worker_payload = s:read_split_worker_result_payload_with_retry(
-          \ get(l:generate_split_context, 'result_path', ''),
-          \ 1000)
-    let l:split_result = s:split_result_from_worker_payload(l:worker_payload)
+    try
+      let l:worker_payload = s:read_split_worker_result_payload_with_retry(
+            \ get(l:generate_split_context, 'result_path', ''),
+            \ 5000)
+      let l:split_result = s:split_result_from_worker_payload(l:worker_payload)
+    catch
+      let l:worker_error = s:format_exception(v:exception)
+      if !s:is_split_worker_result_missing_error(l:worker_error)
+        throw l:worker_error
+      endif
+
+      let l:split_options = get(l:generate_split_context, 'split_options', v:null)
+      if type(l:split_options) != v:t_dict
+        throw l:worker_error
+      endif
+
+      let l:split_result = s:split_compile_commands(l:split_options)
+      call s:write_info('Split worker result was unavailable; completed split with in-process fallback.')
+    endtry
+
     call s:write_split_result_messages(l:split_result)
     let l:generate_split_context.targets = s:generate_targets_from_split_result(
           \ get(l:generate_split_context, 'scan_directory', ''),
