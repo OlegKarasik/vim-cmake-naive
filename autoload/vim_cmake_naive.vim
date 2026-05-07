@@ -3305,18 +3305,10 @@ endfunction
 function! s:start_generate_targets_cache_and_split_async(context) abort
   let l:generate_split_context = s:prepare_generate_split_context(a:context)
   let l:split_job_key = s:new_generate_split_job_key()
-  let l:request_path = s:path_join(
-        \ l:generate_split_context.scan_directory,
-        \ '.vim-cmake-naive-generate-split-request-' . l:split_job_key . '.json')
-  let l:result_path = s:path_join(
-        \ l:generate_split_context.scan_directory,
-        \ '.vim-cmake-naive-generate-split-result-' . l:split_job_key . '.json')
   let l:worker_job_context = s:start_split_worker_job(
         \ l:generate_split_context.split_options,
         \ {
-        \   'exit_cb': function('s:on_generate_split_job_exit', [l:split_job_key]),
-        \   'request_path': l:request_path,
-        \   'result_path': l:result_path
+        \   'exit_cb': function('s:on_generate_split_job_exit', [l:split_job_key])
         \ })
   let l:generate_split_context.split_job_key = l:split_job_key
   let l:generate_split_context.project_key = s:generate_split_project_key(l:generate_split_context.config_path)
