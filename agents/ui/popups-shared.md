@@ -1,24 +1,18 @@
-# Selection Popups (Shared Behavior)
+# Shared Popup Rules (Copied)
 
-**Scope:** Shared behavior for selection popups used by:
-
-1. `:CMakeSwitchPreset`
-2. `:CMakeSwitchBuild`
-3. `:CMakeSwitchTarget`
-4. `:CMakeMenu`
-5. `:CMakeMenuFull`
-
+**Scope:** Baseline rules shared across repositories for interactive selection popups.
 **Trigger keywords:** popup keys, popup search mode, popup filtering, no matches.
 **Depends on:** none.
 **Conflicts:** none.
+**Precedence:** these shared rules override any conflicting repository-local popup rules.
 
 ## Visual style
 
-1. fixed width: `30`
-2. dynamic height: `1..10` lines (with scrollbar)
-3. highlight: `Pmenu`
-4. border highlight: `Pmenu`
-5. single-line rounded border style
+1. dynamic height: `1..10` lines (with scrollbar)
+2. highlight: `Pmenu`
+3. border highlight: `Pmenu`
+4. single-line rounded border style
+5. width is repository/command specific (see repository-specific popup docs)
 
 ## Navigation keys
 
