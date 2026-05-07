@@ -2259,11 +2259,7 @@ function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_command
     let l:lib_split_path = s:path_join(
           \ s:path_join(s:path_join(l:fixture.root, 'build/lib/CMakeFiles'), 'mylib.dir'),
           \ 'compile_commands.json')
-    let l:cache_ready = s:wait_for_file(l:cache_path, 5000)
-    call assert_true(l:cache_ready, 'Expected local cache file to be written.')
-    if !l:cache_ready
-      return
-    endif
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
     call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
     call assert_true(filereadable(l:app_split_path), 'Expected app split compile_commands.json to be written.')
     call assert_true(filereadable(l:lib_split_path), 'Expected mylib split compile_commands.json to be written.')
@@ -2320,11 +2316,7 @@ function! s:test_cmake_generate_updates_targets_cache_and_splits_compile_command
     let l:lib_split_path = s:path_join(
           \ s:path_join(s:path_join(l:preset_root, 'lib/CMakeFiles'), 'mylib.dir'),
           \ 'compile_commands.json')
-    let l:cache_ready = s:wait_for_file(l:cache_path, 5000)
-    call assert_true(l:cache_ready, 'Expected local cache file to be written.')
-    if !l:cache_ready
-      return
-    endif
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
     call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
     call assert_true(filereadable(l:app_split_path), 'Expected app split compile_commands.json in preset directory.')
     call assert_true(filereadable(l:lib_split_path), 'Expected mylib split compile_commands.json in preset directory.')
@@ -2384,15 +2376,9 @@ function! s:test_cmake_generate_reselects_configured_target_when_target_is_set()
     let l:selected_target_commands = s:path_join(
           \ s:path_join(s:path_join(l:fixture.root, 'out/build-dir/dev/lib/CMakeFiles'), 'mylib.dir'),
           \ 'compile_commands.json')
-    let l:cache_ready = s:wait_for_file(l:cache_path, 5000)
-    let l:selected_target_ready = s:wait_for_file(l:selected_target_commands, 5000)
-    let l:active_commands_ready = s:wait_for_file(l:active_commands, 5000)
-    call assert_true(l:cache_ready, 'Expected local cache file to be written.')
-    call assert_true(l:selected_target_ready, 'Expected selected target compile_commands.json to be written.')
-    call assert_true(l:active_commands_ready, 'Expected active compile_commands.json to be written.')
-    if !l:cache_ready || !l:selected_target_ready || !l:active_commands_ready
-      return
-    endif
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
+    call assert_true(s:wait_for_file(l:selected_target_commands, 1000), 'Expected selected target compile_commands.json to be written.')
+    call assert_true(s:wait_for_file(l:active_commands, 1000), 'Expected active compile_commands.json to be written.')
     call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
     call assert_equal(
           \ {'output': 'out/build-dir', 'preset': 'dev', 'target': 'mylib', 'build': 'Release', 'keep': 1},
@@ -2452,11 +2438,7 @@ function! s:test_cmake_generate_ignores_targets_from_deps_directory() abort
     let l:deps_split_path = s:path_join(
           \ s:path_join(s:path_join(l:fixture.root, 'build/_deps/zlib-build/CMakeFiles'), 'zlib.dir'),
           \ 'compile_commands.json')
-    let l:cache_ready = s:wait_for_file(l:cache_path, 5000)
-    call assert_true(l:cache_ready, 'Expected local cache file to be written.')
-    if !l:cache_ready
-      return
-    endif
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
     call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
     call assert_true(filereadable(l:deps_split_path), 'Expected split file for _deps target to be written.')
   finally

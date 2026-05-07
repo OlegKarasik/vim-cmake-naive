@@ -35,9 +35,6 @@ let s:build_terminal_success_callbacks = {}
 let s:hidden_terminal_buffer_numbers_by_job = {}
 let s:terminal_output_capture_lines_by_key = {}
 let s:terminal_output_capture_sequence = 0
-let s:generate_split_job_contexts_by_key = {}
-let s:latest_generate_split_job_key_by_project = {}
-let s:generate_split_job_sequence = 0
 let s:last_cmake_terminal_buffer_number = -1
 let s:running_cmake_command_name = ''
 let s:keep_running_cmake_command_lock = 0
@@ -369,38 +366,10 @@ endfunction
 function! vim_cmake_naive#split(...) abort
   try
     let l:options = s:parse_split_args(a:000)
-    let l:split_result = s:run_split_via_worker_sync(l:options)
-    call s:write_split_result_messages(l:split_result)
+    call s:run_split(l:options)
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
-endfunction
-
-function! vim_cmake_naive#split_worker(request_path, result_path) abort
-  let l:request_path = trim(s:to_string_or_empty(a:request_path))
-  let l:result_path = trim(s:to_string_or_empty(a:result_path))
-  if empty(l:request_path)
-    throw 'Split worker request path cannot be empty.'
-  endif
-  if empty(l:result_path)
-    throw 'Split worker result path cannot be empty.'
-  endif
-
-  let l:worker_result = {'success': 0, 'error': '', 'result': {}}
-  try
-    let l:request_payload = s:read_json_object(l:request_path)
-    let l:split_options = get(l:request_payload, 'options', v:null)
-    if type(l:split_options) != v:t_dict
-      throw 'Split worker request key "options" must be a JSON object.'
-    endif
-    let l:worker_result.result = s:split_compile_commands(l:split_options)
-    let l:worker_result.success = 1
-  catch
-    let l:worker_result.error = s:format_exception(v:exception)
-  endtry
-
-  call mkdir(fnamemodify(l:result_path, ':h'), 'p')
-  call s:write_json_file(l:result_path, l:worker_result)
 endfunction
 
 function! vim_cmake_naive#switch(...) abort
@@ -840,7 +809,7 @@ function! s:parse_switch_args(argv) abort
   return l:options
 endfunction
 
-function! s:split_compile_commands(options) abort
+function! s:run_split(options) abort
   let l:build_directory = s:resolve_build_directory(a:options.build_directory)
   let l:input_path = s:resolve_input_file_path(a:options.input_path, l:build_directory)
   let l:entries = s:read_json_array(l:input_path)
@@ -890,16 +859,12 @@ function! s:split_compile_commands(options) abort
   call sort(l:target_directories)
 
   let l:file_write_count = 0
-  let l:split_outputs = []
   for l:target_directory in l:target_directories
     let l:output_path = s:path_join(l:target_directory, a:options.output_name)
-    let l:entry_count = len(l:grouped_entries[l:target_directory])
-    call add(l:split_outputs, {
-          \ 'path': l:output_path,
-          \ 'entry_count': l:entry_count
-          \ })
+    let l:relative_output_path = s:relative_path(l:output_path, l:build_directory)
 
     if a:options.dry_run
+      call s:write_info('[dry-run] ' . l:relative_output_path . ': ' . len(l:grouped_entries[l:target_directory]) . ' entries')
       continue
     endif
 
@@ -907,250 +872,18 @@ function! s:split_compile_commands(options) abort
     call s:write_json_file(l:output_path, l:grouped_entries[l:target_directory])
 
     let l:file_write_count += 1
-  endfor
-
-  return {
-        \ 'build_directory': l:build_directory,
-        \ 'outputs': l:split_outputs,
-        \ 'dry_run': s:as_condition_bool(a:options.dry_run),
-        \ 'processed_count': l:processed_count,
-        \ 'assigned_count': l:assigned_count,
-        \ 'skipped_count': l:skipped_count,
-        \ 'planned_output_count': len(l:target_directories),
-        \ 'file_write_count': l:file_write_count
-        \ }
-endfunction
-
-function! s:write_split_result_messages(result) abort
-  if type(a:result) != v:t_dict
-    throw 'Split result payload must be a JSON object.'
-  endif
-
-  let l:build_directory = trim(s:to_string_or_empty(get(a:result, 'build_directory', '')))
-  let l:split_outputs = get(a:result, 'outputs', [])
-  if type(l:split_outputs) != v:t_list
-    let l:split_outputs = []
-  endif
-  let l:is_dry_run = s:as_condition_bool(get(a:result, 'dry_run', 0))
-  for l:split_output in l:split_outputs
-    if type(l:split_output) != v:t_dict
-      continue
-    endif
-
-    let l:output_path = trim(s:to_string_or_empty(get(l:split_output, 'path', '')))
-    let l:entry_count = str2nr(s:to_string_or_empty(get(l:split_output, 'entry_count', 0)))
-    let l:display_output_path = (!empty(l:build_directory) && !empty(l:output_path))
-          \ ? s:relative_path(l:output_path, l:build_directory)
-          \ : l:output_path
-    if l:is_dry_run
-      call s:write_info('[dry-run] ' . l:display_output_path . ': ' . l:entry_count . ' entries')
-    else
-      call s:write_info('Wrote ' . l:entry_count . ' entries to ' . l:display_output_path)
-    endif
+    call s:write_info('Wrote ' . len(l:grouped_entries[l:target_directory]) . ' entries to ' . l:relative_output_path)
   endfor
 
   call s:write_info('')
-  call s:write_info('Processed entries: ' . str2nr(s:to_string_or_empty(get(a:result, 'processed_count', 0))))
-  call s:write_info('Assigned entries: ' . str2nr(s:to_string_or_empty(get(a:result, 'assigned_count', 0))))
-  call s:write_info('Skipped entries: ' . str2nr(s:to_string_or_empty(get(a:result, 'skipped_count', 0))))
-  if l:is_dry_run
-    call s:write_info('Planned output files: ' . str2nr(s:to_string_or_empty(get(a:result, 'planned_output_count', 0))))
+  call s:write_info('Processed entries: ' . l:processed_count)
+  call s:write_info('Assigned entries: ' . l:assigned_count)
+  call s:write_info('Skipped entries: ' . l:skipped_count)
+  if a:options.dry_run
+    call s:write_info('Planned output files: ' . len(l:target_directories))
   else
-    call s:write_info('Written files: ' . str2nr(s:to_string_or_empty(get(a:result, 'file_write_count', 0))))
+    call s:write_info('Written files: ' . l:file_write_count)
   endif
-endfunction
-
-function! s:split_worker_command_argv(request_path, result_path) abort
-  let l:vim_program = trim(s:to_string_or_empty(v:progpath))
-  if empty(l:vim_program)
-    throw 'Failed to resolve current Vim executable path for split worker.'
-  endif
-
-  let l:plugin_root = s:normalize_full_path(fnamemodify(expand('<sfile>:p'), ':h:h'))
-  let l:worker_call = 'call vim_cmake_naive#split_worker('
-        \ . string(a:request_path)
-        \ . ', '
-        \ . string(a:result_path)
-        \ . ')'
-  return [
-        \ l:vim_program,
-        \ '-Nu',
-        \ 'NONE',
-        \ '-n',
-        \ '-es',
-        \ '-c',
-        \ 'set nomore',
-        \ '-c',
-        \ 'set runtimepath^=' . fnameescape(l:plugin_root),
-        \ '-c',
-        \ l:worker_call,
-        \ '-c',
-        \ 'quitall!'
-        \ ]
-endfunction
-
-function! s:is_valid_job_start_result(job) abort
-  if type(a:job) == v:t_number
-    return a:job > 0
-  endif
-
-  return exists('v:t_job') && type(a:job) == v:t_job
-endfunction
-
-function! s:cleanup_split_worker_files(request_path, result_path) abort
-  for l:path in [a:request_path, a:result_path]
-    let l:path = trim(s:to_string_or_empty(l:path))
-    if empty(l:path) || !filereadable(l:path)
-      continue
-    endif
-
-    call delete(l:path)
-  endfor
-endfunction
-
-function! s:start_split_worker_job(options, job_options) abort
-  if type(a:options) != v:t_dict
-    throw 'Split options must be a JSON object.'
-  endif
-  if !exists('*job_start')
-    throw 'Asynchronous split execution is not supported in this Vim build.'
-  endif
-
-  let l:job_options = type(a:job_options) == v:t_dict ? copy(a:job_options) : {}
-  let l:request_path = trim(s:to_string_or_empty(get(l:job_options, 'request_path', '')))
-  let l:result_path = trim(s:to_string_or_empty(get(l:job_options, 'result_path', '')))
-  if has_key(l:job_options, 'request_path')
-    call remove(l:job_options, 'request_path')
-  endif
-  if has_key(l:job_options, 'result_path')
-    call remove(l:job_options, 'result_path')
-  endif
-  if empty(l:request_path)
-    let l:request_path = tempname() . '-vim-cmake-naive-split-request.json'
-  endif
-  if empty(l:result_path)
-    let l:result_path = tempname() . '-vim-cmake-naive-split-result.json'
-  endif
-
-  call s:write_json_file(l:request_path, {'options': copy(a:options)})
-
-  let l:job = job_start(s:split_worker_command_argv(l:request_path, l:result_path), l:job_options)
-  if !s:is_valid_job_start_result(l:job)
-    call s:cleanup_split_worker_files(l:request_path, l:result_path)
-    throw 'Failed to start split worker job.'
-  endif
-
-  return {
-        \ 'job': l:job,
-        \ 'request_path': l:request_path,
-        \ 'result_path': l:result_path
-        \ }
-endfunction
-
-function! s:read_split_worker_result_payload_with_retry(result_path, timeout_ms) abort
-  let l:result_path = trim(s:to_string_or_empty(a:result_path))
-  if empty(l:result_path)
-    throw 'Split worker result file path cannot be empty.'
-  endif
-
-  let l:timeout_ms = type(a:timeout_ms) == v:t_number
-        \ ? max([0, a:timeout_ms])
-        \ : max([0, str2nr(s:to_string_or_empty(a:timeout_ms))])
-  let l:elapsed_ms = 0
-  let l:last_read_error = ''
-  while l:elapsed_ms <= l:timeout_ms
-    if filereadable(l:result_path)
-      try
-        return s:read_json_object(l:result_path)
-      catch
-        let l:last_read_error = s:format_exception(v:exception)
-      endtry
-    endif
-
-    if l:elapsed_ms == l:timeout_ms
-      break
-    endif
-
-    sleep 10m
-    let l:elapsed_ms += 10
-  endwhile
-
-  if !filereadable(l:result_path)
-    throw 'Split worker result file not found: ' . l:result_path
-  endif
-
-  if empty(l:last_read_error)
-    throw 'Failed to read split worker result file: ' . l:result_path
-  endif
-
-  throw l:last_read_error
-endfunction
-
-function! s:is_split_worker_result_missing_error(message) abort
-  let l:message = trim(s:to_string_or_empty(a:message))
-  return !empty(l:message)
-        \ && (
-        \   stridx(l:message, 'Split worker result file not found:') >= 0
-        \   || stridx(l:message, 'Failed to read split worker result file:') >= 0
-        \ )
-endfunction
-
-function! s:split_result_from_worker_payload(worker_payload) abort
-  if type(a:worker_payload) != v:t_dict
-    throw 'Split worker result payload must be a JSON object.'
-  endif
-
-  let l:is_success = s:as_condition_bool(get(a:worker_payload, 'success', 0))
-  if !l:is_success
-    let l:error_message = trim(s:to_string_or_empty(get(a:worker_payload, 'error', 'Split worker failed.')))
-    throw empty(l:error_message) ? 'Split worker failed.' : l:error_message
-  endif
-
-  let l:split_result = get(a:worker_payload, 'result', v:null)
-  if type(l:split_result) != v:t_dict
-    throw 'Split worker result key "result" must be a JSON object.'
-  endif
-
-  return l:split_result
-endfunction
-
-function! s:run_split_via_worker_sync(options) abort
-  if !exists('*job_start') || !exists('*job_wait')
-    return s:split_compile_commands(a:options)
-  endif
-
-  let l:worker_job_context = s:start_split_worker_job(a:options, {})
-  let l:wait_status = job_wait([l:worker_job_context.job], -1)
-  let l:wait_code = type(l:wait_status) == v:t_list
-        \ ? str2nr(s:to_string_or_empty(get(l:wait_status, 0, -3)))
-        \ : -3
-  try
-    let l:worker_payload = s:read_split_worker_result_payload_with_retry(l:worker_job_context.result_path, 5000)
-  catch
-    let l:worker_error = s:format_exception(v:exception)
-    if l:wait_code == 0 && s:is_split_worker_result_missing_error(l:worker_error)
-      return s:split_compile_commands(a:options)
-    endif
-    if l:wait_code == -1
-      throw 'Split worker job timed out.'
-    endif
-    if l:wait_code == -2
-      throw 'Split worker job was interrupted.'
-    endif
-    if l:wait_code == -3
-      throw 'Split worker job failed to start.'
-    endif
-    if l:wait_code != 0
-      throw 'Split worker job failed with exit code ' . l:wait_code . '.'
-    endif
-    throw l:worker_error
-  finally
-    call s:cleanup_split_worker_files(
-          \ get(l:worker_job_context, 'request_path', ''),
-          \ get(l:worker_job_context, 'result_path', ''))
-  endtry
-
-  return s:split_result_from_worker_payload(l:worker_payload)
 endfunction
 
 function! s:run_switch(options) abort
@@ -2602,13 +2335,12 @@ function! s:ensure_target_compile_commands(target_name, target_directory, preset
         \ . '. Splitting root file: '
         \ . s:relative_path(l:root_compile_commands_path, l:split_build_directory))
 
-  let l:split_result = s:run_split_via_worker_sync({
+  call s:run_split({
         \ 'build_directory': l:split_build_directory,
         \ 'input_path': l:root_compile_commands_path,
         \ 'output_name': s:default_output_filename,
         \ 'dry_run': 0
         \ })
-  call s:write_split_result_messages(l:split_result)
 
   if !filereadable(l:source_file_path)
     let l:fallback_source_file_path = s:find_target_compile_commands_file(a:target_name, a:build_directory)
@@ -3137,76 +2869,13 @@ endfunction
 
 function! s:on_generate_command_success(context) abort
   try
-    if s:should_capture_build_terminal_for_tests() || !exists('*job_start')
-      call s:update_generate_targets_cache_and_split(a:context)
-    else
-      call s:start_generate_targets_cache_and_split_async(a:context)
-    endif
+    call s:update_generate_targets_cache_and_split(a:context)
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
 endfunction
 
-function! s:new_generate_split_job_key() abort
-  let s:generate_split_job_sequence += 1
-  return string(s:generate_split_job_sequence)
-endfunction
-
-function! s:generate_split_project_key(config_path) abort
-  let l:config_path = trim(s:to_string_or_empty(a:config_path))
-  if empty(l:config_path)
-    return ''
-  endif
-
-  return s:normalize_full_path(fnamemodify(l:config_path, ':h'))
-endfunction
-
-function! s:take_generate_split_job_context(split_job_key) abort
-  let l:split_job_key = trim(s:to_string_or_empty(a:split_job_key))
-  if empty(l:split_job_key)
-    return {}
-  endif
-
-  let l:context = get(s:generate_split_job_contexts_by_key, l:split_job_key, {})
-  if has_key(s:generate_split_job_contexts_by_key, l:split_job_key)
-    call remove(s:generate_split_job_contexts_by_key, l:split_job_key)
-  endif
-
-  return l:context
-endfunction
-
-function! s:is_latest_generate_split_job_context(context) abort
-  if type(a:context) != v:t_dict
-    return 0
-  endif
-
-  let l:project_key = trim(s:to_string_or_empty(get(a:context, 'project_key', '')))
-  if empty(l:project_key)
-    return 1
-  endif
-
-  let l:split_job_key = trim(s:to_string_or_empty(get(a:context, 'split_job_key', '')))
-  return !empty(l:split_job_key)
-        \ && get(s:latest_generate_split_job_key_by_project, l:project_key, '') ==# l:split_job_key
-endfunction
-
-function! s:clear_latest_generate_split_job_context(context) abort
-  if type(a:context) != v:t_dict
-    return
-  endif
-
-  let l:project_key = trim(s:to_string_or_empty(get(a:context, 'project_key', '')))
-  if empty(l:project_key) || !has_key(s:latest_generate_split_job_key_by_project, l:project_key)
-    return
-  endif
-
-  let l:split_job_key = trim(s:to_string_or_empty(get(a:context, 'split_job_key', '')))
-  if get(s:latest_generate_split_job_key_by_project, l:project_key, '') ==# l:split_job_key
-    call remove(s:latest_generate_split_job_key_by_project, l:project_key)
-  endif
-endfunction
-
-function! s:prepare_generate_split_context(context) abort
+function! s:update_generate_targets_cache_and_split(context) abort
   if type(a:context) != v:t_dict
     throw 'Generate completion context must be a JSON object.'
   endif
@@ -3229,78 +2898,14 @@ function! s:prepare_generate_split_context(context) abort
         \ l:build_directory,
         \ l:scan_directory,
         \ '')
-
-  return {
-        \ 'config_path': l:config_path,
-        \ 'project_root': l:project_root,
-        \ 'build_directory': l:build_directory,
-        \ 'scan_directory': l:scan_directory,
-        \ 'split_options': {
+  let l:targets = s:available_targets(l:scan_directory, l:root_compile_commands_path)
+  let l:cache_path = s:update_local_targets_cache(l:config_path, l:targets)
+  call s:run_split({
         \ 'build_directory': l:scan_directory,
         \ 'input_path': l:root_compile_commands_path,
         \ 'output_name': s:default_output_filename,
         \ 'dry_run': 0
-        \ }
-        \ }
-endfunction
-
-function! s:generate_targets_from_split_result(scan_directory, split_result) abort
-  if empty(trim(a:scan_directory))
-    throw 'Build directory cannot be empty.'
-  endif
-  if type(a:split_result) != v:t_dict
-    throw 'Split result payload must be a JSON object.'
-  endif
-
-  let l:split_outputs = get(a:split_result, 'outputs', v:null)
-  if type(l:split_outputs) != v:t_list
-    throw 'Split result key "outputs" must be a JSON array.'
-  endif
-
-  let l:targets = []
-  let l:seen = {}
-  for l:split_output in l:split_outputs
-    if type(l:split_output) != v:t_dict
-      continue
-    endif
-
-    let l:output_path = trim(s:to_string_or_empty(get(l:split_output, 'path', '')))
-    if empty(l:output_path)
-      continue
-    endif
-
-    let l:target_directory = s:normalize_full_path(fnamemodify(l:output_path, ':h'))
-    let l:target_name = s:target_name_from_directory(l:target_directory, a:scan_directory)
-    if empty(l:target_name) || has_key(l:seen, l:target_name)
-      continue
-    endif
-
-    let l:seen[l:target_name] = 1
-    call add(l:targets, l:target_name)
-  endfor
-
-  call sort(l:targets)
-  return l:targets
-endfunction
-
-function! s:complete_generate_targets_cache_after_split(context) abort
-  if type(a:context) != v:t_dict
-    throw 'Generate completion context must be a JSON object.'
-  endif
-
-  let l:config_path = trim(s:to_string_or_empty(get(a:context, 'config_path', '')))
-  if empty(l:config_path)
-    throw 'Config path cannot be empty.'
-  endif
-  let l:project_root = trim(s:to_string_or_empty(get(a:context, 'project_root', '')))
-  let l:build_directory = trim(s:to_string_or_empty(get(a:context, 'build_directory', '')))
-  let l:scan_directory = trim(s:to_string_or_empty(get(a:context, 'scan_directory', '')))
-  let l:targets = get(a:context, 'targets', v:null)
-  if type(l:targets) != v:t_list
-    throw 'Targets value must be a JSON array.'
-  endif
-
-  let l:cache_path = s:update_local_targets_cache(l:config_path, l:targets)
+        \ })
   let l:config = s:read_json_object(l:config_path)
   call s:maybe_reselect_configured_target_after_generate(
         \ l:config_path,
@@ -3313,81 +2918,6 @@ function! s:complete_generate_targets_cache_after_split(context) abort
   else
     call s:write_info('Updated target cache in ' . l:cache_path)
   endif
-endfunction
-
-function! s:start_generate_targets_cache_and_split_async(context) abort
-  let l:generate_split_context = s:prepare_generate_split_context(a:context)
-  let l:split_job_key = s:new_generate_split_job_key()
-  let l:worker_job_context = s:start_split_worker_job(
-        \ l:generate_split_context.split_options,
-        \ {
-        \   'exit_cb': function('s:on_generate_split_job_exit', [l:split_job_key])
-        \ })
-  let l:generate_split_context.split_job_key = l:split_job_key
-  let l:generate_split_context.project_key = s:generate_split_project_key(l:generate_split_context.config_path)
-  call extend(l:generate_split_context, l:worker_job_context)
-  let s:generate_split_job_contexts_by_key[l:split_job_key] = l:generate_split_context
-  if !empty(l:generate_split_context.project_key)
-    let s:latest_generate_split_job_key_by_project[l:generate_split_context.project_key] = l:split_job_key
-  endif
-endfunction
-
-function! s:on_generate_split_job_exit(split_job_key, job, status) abort
-  let l:generate_split_context = s:take_generate_split_job_context(a:split_job_key)
-  if empty(l:generate_split_context)
-    return
-  endif
-
-  try
-    if !s:is_latest_generate_split_job_context(l:generate_split_context)
-      return
-    endif
-
-    try
-      let l:worker_payload = s:read_split_worker_result_payload_with_retry(
-            \ get(l:generate_split_context, 'result_path', ''),
-            \ 5000)
-      let l:split_result = s:split_result_from_worker_payload(l:worker_payload)
-    catch
-      let l:worker_error = s:format_exception(v:exception)
-      if !s:is_split_worker_result_missing_error(l:worker_error)
-        throw l:worker_error
-      endif
-
-      let l:split_options = get(l:generate_split_context, 'split_options', v:null)
-      if type(l:split_options) != v:t_dict
-        throw l:worker_error
-      endif
-
-      let l:split_result = s:split_compile_commands(l:split_options)
-      call s:write_info('Split worker result was unavailable; completed split with in-process fallback.')
-    endtry
-
-    call s:write_split_result_messages(l:split_result)
-    let l:generate_split_context.targets = s:generate_targets_from_split_result(
-          \ get(l:generate_split_context, 'scan_directory', ''),
-          \ l:split_result)
-    call s:complete_generate_targets_cache_after_split(l:generate_split_context)
-  catch
-    if s:is_latest_generate_split_job_context(l:generate_split_context)
-      call s:write_error(s:format_exception(v:exception))
-    endif
-  finally
-    call s:clear_latest_generate_split_job_context(l:generate_split_context)
-    call s:cleanup_split_worker_files(
-          \ get(l:generate_split_context, 'request_path', ''),
-          \ get(l:generate_split_context, 'result_path', ''))
-  endtry
-endfunction
-
-function! s:update_generate_targets_cache_and_split(context) abort
-  let l:generate_split_context = s:prepare_generate_split_context(a:context)
-  let l:split_result = s:run_split_via_worker_sync(l:generate_split_context.split_options)
-  call s:write_split_result_messages(l:split_result)
-  let l:generate_split_context.targets = s:generate_targets_from_split_result(
-        \ l:generate_split_context.scan_directory,
-        \ l:split_result)
-  call s:complete_generate_targets_cache_after_split(l:generate_split_context)
 endfunction
 
 function! s:maybe_reselect_configured_target_after_generate(config_path, config, build_directory, scan_directory) abort
