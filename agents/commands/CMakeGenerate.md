@@ -4,6 +4,7 @@
 **Trigger keywords:** CMakeGenerate, cmake -S, configure, generate targets.
 **Depends on:** `agents/core/concepts.md`.
 **Conflicts:** none.
+**Maintenance rule:** Any behavior change for `:CMakeGenerate` must be reflected in the GitHub Wiki page `CMakeGenerate` in the same change set.
 
 1. Resolves Root Directory.
 2. Resolves Local Configuration, creating default config if missing.
