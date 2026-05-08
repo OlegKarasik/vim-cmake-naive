@@ -2764,6 +2764,9 @@ function! s:test_cmake_build_sets_running_terminal_name_on_subsequent_invocation
 
     let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name('cmake build --preset=dev --target=mylib', 1000)
     call assert_true(l:running_buffer_number > 0, 'Expected running build terminal buffer on second invocation.')
+    call assert_true(
+          \ !bufexists(l:first_running_buffer_number),
+          \ 'Expected previous hidden build terminal buffer to be cleaned before second invocation.')
     call assert_equal(0, s:wait_for_running_terminal_window(200), 'Expected no visible build terminal window.')
     call assert_true(
           \ s:wait_for_terminal_buffer_completion(l:running_buffer_number, 3000),

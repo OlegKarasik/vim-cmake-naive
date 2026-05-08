@@ -6,7 +6,8 @@
 **Conflicts:** none.
 
 1. Closes visible preview windows that display plugin-managed CMake terminal output.
-2. Keeps terminal buffers hidden (does not wipe them).
-3. Keeps latest terminal output available for subsequent `:CMakeShowPreview`.
+2. Keeps terminal buffers hidden (does not wipe them as part of hide action).
+3. Keeps latest terminal output available for subsequent `:CMakeShowPreview`
+   until another hidden terminal command starts or `:CMakeClose` is invoked.
 4. Does not acquire the command lock, so it can run while another terminal
    CMake command is active.

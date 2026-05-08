@@ -4173,6 +4173,8 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
     endif
   endif
 
+  call s:close_build_terminal_hidden_buffers()
+
   let l:term_start_options = {'hidden': 1}
   let l:term_start_options.out_cb = function('s:on_terminal_command_stdout', [l:output_capture_key])
   let l:term_start_options.err_cb = function('s:on_terminal_command_stderr', [l:output_capture_key])

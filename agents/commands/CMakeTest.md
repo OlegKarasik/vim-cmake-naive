@@ -12,6 +12,8 @@
 5. Starts asynchronous terminal command in that directory:
    1. `ctest --parallel <N>`
 6. Runs asynchronously in hidden plugin terminal buffer by default.
+   1. Before each hidden run, wipes existing hidden plugin-managed CMake
+      terminal buffers.
 7. Terminal log ends by printing an empty line followed by the executed command
    line prefixed with `[Command]:`.
 8. If a plugin CMake preview window is already visible, it reuses that preview

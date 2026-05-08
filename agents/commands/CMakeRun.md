@@ -20,6 +20,8 @@
 6. Starts asynchronous terminal command for discovered executable in run
    directory.
 7. Runs asynchronously in hidden plugin terminal buffer by default.
+   1. Before each hidden run, wipes existing hidden plugin-managed CMake
+      terminal buffers.
 8. Terminal log ends by printing an empty line followed by the executed command
    line prefixed with `[Command]:`.
 9. If a plugin CMake preview window is already visible, it reuses that preview

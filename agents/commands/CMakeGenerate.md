@@ -4,7 +4,6 @@
 **Trigger keywords:** CMakeGenerate, cmake -S, configure, generate targets.
 **Depends on:** `agents/core/concepts.md`.
 **Conflicts:** none.
-**Maintenance rule:** Any behavior change for `:CMakeGenerate` must be reflected in the GitHub Wiki page `CMakeGenerate` in the same change set.
 
 1. Resolves Root Directory.
 2. Resolves Local Configuration, creating default config if missing.
@@ -19,6 +18,8 @@
    3. otherwise uses
       `cmake -S <root> -B <generation-dir> --fresh -DCMAKE_BUILD_TYPE=<build>`
 6. Runs in hidden plugin terminal buffer by default.
+   1. Before each hidden run, wipes existing hidden plugin-managed CMake
+      terminal buffers.
 7. Terminal log ends by printing an empty line followed by the executed command
    line prefixed with `[Command]:`.
 8. If a plugin CMake preview window is already visible, it reuses that preview
