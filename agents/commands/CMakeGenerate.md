@@ -10,9 +10,12 @@
 3. Computes output directories from `output` and optional `preset`.
 4. Ensures output directories exist.
 5. Starts asynchronous terminal command:
-   1. `cmake -S <root> -B <generation-dir> --fresh --preset <preset>` when
-      preset is non-empty
-   2. otherwise uses
+   1. when `CMakePresets.json` is present and has detected configure presets,
+      runs configure for **all** detected presets:
+      `cmake -S <root> -B <output>/<preset> --fresh --preset <preset>`
+   2. otherwise, if config `preset` is non-empty, uses
+      `cmake -S <root> -B <generation-dir> --fresh --preset <preset>`
+   3. otherwise uses
       `cmake -S <root> -B <generation-dir> --fresh -DCMAKE_BUILD_TYPE=<build>`
 6. Runs in hidden plugin terminal buffer by default.
 7. Terminal log ends by printing an empty line followed by the executed command

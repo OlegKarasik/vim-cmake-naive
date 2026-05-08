@@ -2790,6 +2790,65 @@ function! s:inputlist_selection(prompt, items) abort
   return inputlist(l:lines)
 endfunction
 
+function! s:available_generate_presets(project_root) abort
+  let l:presets_path = s:cmake_presets_path(a:project_root)
+  if !filereadable(l:presets_path)
+    return []
+  endif
+
+  let l:presets_payload = s:read_json_object(l:presets_path)
+  return s:available_configure_presets(l:presets_payload, a:project_root)
+endfunction
+
+function! s:ordered_generate_presets(presets, selected_preset) abort
+  if type(a:presets) != v:t_list
+    throw 'Preset values must be a JSON array.'
+  endif
+
+  let l:ordered_presets = []
+  let l:selected_preset = trim(s:to_string_or_empty(a:selected_preset))
+  let l:selected_preset_found = 0
+  for l:preset in a:presets
+    let l:preset_name = trim(s:to_string_or_empty(l:preset))
+    if empty(l:preset_name)
+      continue
+    endif
+
+    if !empty(l:selected_preset) && l:preset_name ==# l:selected_preset
+      let l:selected_preset_found = 1
+      continue
+    endif
+
+    call add(l:ordered_presets, l:preset_name)
+  endfor
+
+  if l:selected_preset_found
+    call add(l:ordered_presets, l:selected_preset)
+  endif
+
+  return l:ordered_presets
+endfunction
+
+function! s:cmake_generate_all_presets_argv(project_root, build_directory, presets) abort
+  if type(a:presets) != v:t_list || empty(a:presets)
+    throw 'Preset values must be a non-empty JSON array.'
+  endif
+  if !has('unix')
+    throw 'Generating all presets is currently supported only on Unix-like systems.'
+  endif
+
+  let l:argv = [
+        \ 'sh',
+        \ '-c',
+        \ 'project_root="$1"; shift; build_directory="$1"; shift; for preset in "$@"; do cmake -S "$project_root" -B "$build_directory/$preset" --fresh --preset "$preset" || exit $?; done',
+        \ 'vim-cmake-naive-generate',
+        \ a:project_root,
+        \ a:build_directory
+        \ ]
+  call extend(l:argv, copy(a:presets))
+  return l:argv
+endfunction
+
 function! s:run_cmake_config_default() abort
   let l:project_root = s:resolve_cmake_project_root_with_file_fallback(getcwd())
   let l:config_path = s:cmake_config_path(l:project_root)
@@ -2825,36 +2884,67 @@ function! s:run_generate() abort
 
   let l:preset_value = trim(s:to_string_or_empty(get(l:config, s:cmake_config_preset_key, '')))
   let l:build_directory = s:resolve_path(l:output_value, l:project_root)
-  let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
-  let l:generation_directory = empty(l:preset_value) ? l:build_directory : l:preset_output_directory
-  call mkdir(l:build_directory, 'p')
-  if !empty(l:preset_output_directory)
-    call mkdir(l:preset_output_directory, 'p')
-  endif
-
-  let l:argv = [
-        \ 'cmake',
-        \ '-S',
-        \ l:project_root,
-        \ '-B',
-        \ l:generation_directory,
-        \ '--fresh'
-        \ ]
-
-  if !empty(l:preset_value)
-    call add(l:argv, '--preset')
-    call add(l:argv, l:preset_value)
+  let l:argv = []
+  let l:generation_directories = []
+  let l:generate_completion_contexts = []
+  let l:detected_presets = has('unix') ? s:available_generate_presets(l:project_root) : []
+  let l:ordered_presets = s:ordered_generate_presets(l:detected_presets, l:preset_value)
+  if !empty(l:ordered_presets)
+    let l:reselect_preset = !empty(l:preset_value) && index(l:ordered_presets, l:preset_value) >= 0
+          \ ? l:preset_value
+          \ : l:ordered_presets[len(l:ordered_presets) - 1]
+    call mkdir(l:build_directory, 'p')
+    for l:detected_preset in l:ordered_presets
+      let l:preset_generation_directory = s:generate_preset_output_directory(l:build_directory, l:detected_preset)
+      call mkdir(l:preset_generation_directory, 'p')
+      call add(l:generation_directories, l:preset_generation_directory)
+      call add(l:generate_completion_contexts, {
+            \ 'config_path': l:config_path,
+            \ 'project_root': l:project_root,
+            \ 'build_directory': l:build_directory,
+            \ 'scan_directory': l:preset_generation_directory,
+            \ 'preset_value': l:detected_preset,
+            \ 'reselect_target': l:detected_preset ==# l:reselect_preset
+            \ })
+    endfor
+    let l:argv = s:cmake_generate_all_presets_argv(l:project_root, l:build_directory, l:ordered_presets)
+    let l:generate_terminal_name = s:cmake_generate_terminal_running_name_for_presets(l:ordered_presets)
   else
-    call add(l:argv, '-DCMAKE_BUILD_TYPE=' . l:build_value)
+    let l:preset_output_directory = s:generate_preset_output_directory(l:build_directory, l:preset_value)
+    let l:generation_directory = empty(l:preset_value) ? l:build_directory : l:preset_output_directory
+    call mkdir(l:build_directory, 'p')
+    if !empty(l:preset_output_directory)
+      call mkdir(l:preset_output_directory, 'p')
+    endif
+
+    let l:argv = [
+          \ 'cmake',
+          \ '-S',
+          \ l:project_root,
+          \ '-B',
+          \ l:generation_directory,
+          \ '--fresh'
+          \ ]
+
+    if !empty(l:preset_value)
+      call add(l:argv, '--preset')
+      call add(l:argv, l:preset_value)
+    else
+      call add(l:argv, '-DCMAKE_BUILD_TYPE=' . l:build_value)
+    endif
+
+    call add(l:generation_directories, l:generation_directory)
+    call add(l:generate_completion_contexts, {
+          \ 'config_path': l:config_path,
+          \ 'project_root': l:project_root,
+          \ 'build_directory': l:build_directory,
+          \ 'scan_directory': l:generation_directory,
+          \ 'preset_value': l:preset_value,
+          \ 'reselect_target': 1
+          \ })
+    let l:generate_terminal_name = s:cmake_generate_terminal_running_name(l:preset_value)
   endif
 
-  let l:generate_terminal_name = s:cmake_generate_terminal_running_name(l:preset_value)
-  let l:generate_completion_context = {
-        \ 'config_path': l:config_path,
-        \ 'project_root': l:project_root,
-        \ 'build_directory': l:build_directory,
-        \ 'scan_directory': l:generation_directory
-        \ }
   call s:run_build_command_in_vertical_terminal(l:argv, {
         \ 'reuse_previous_build_window': 1,
         \ 'reuse_group': 'shared',
@@ -2862,14 +2952,29 @@ function! s:run_generate() abort
         \ 'open_output_window': s:should_populate_visible_preview_window(),
         \ 'terminal_name': l:generate_terminal_name,
         \ 'command_name': 'CMakeGenerate',
-        \ 'on_success_callback': function('s:on_generate_command_success', [copy(l:generate_completion_context)])
+        \ 'on_success_callback': function('s:on_generate_command_success', [copy(l:generate_completion_contexts)])
         \ })
-  call s:write_info('Started generate in ' . s:relative_path(l:generation_directory, l:project_root))
+  if len(l:ordered_presets) > 1
+    call s:write_info('Started generate for presets: ' . join(l:ordered_presets, ', '))
+  else
+    call s:write_info('Started generate in ' . s:relative_path(l:generation_directories[0], l:project_root))
+  endif
 endfunction
 
-function! s:on_generate_command_success(context) abort
+function! s:on_generate_command_success(contexts) abort
   try
-    call s:update_generate_targets_cache_and_split(a:context)
+    let l:contexts = []
+    if type(a:contexts) == v:t_dict
+      let l:contexts = [a:contexts]
+    elseif type(a:contexts) == v:t_list
+      let l:contexts = copy(a:contexts)
+    else
+      throw 'Generate completion context must be a JSON object or array.'
+    endif
+
+    for l:context in l:contexts
+      call s:update_generate_targets_cache_and_split(l:context)
+    endfor
   catch
     call s:write_error(s:format_exception(v:exception))
   endtry
@@ -2884,6 +2989,9 @@ function! s:update_generate_targets_cache_and_split(context) abort
   let l:project_root = s:to_string_or_empty(get(a:context, 'project_root', ''))
   let l:build_directory = s:to_string_or_empty(get(a:context, 'build_directory', ''))
   let l:scan_directory = s:to_string_or_empty(get(a:context, 'scan_directory', ''))
+  let l:preset_value = trim(s:to_string_or_empty(get(a:context, 'preset_value', '')))
+  let l:reselect_target = !has_key(a:context, 'reselect_target')
+        \ || s:as_condition_bool(get(a:context, 'reselect_target', 1))
   if empty(trim(l:config_path))
     throw 'Config path cannot be empty.'
   endif
@@ -2897,7 +3005,7 @@ function! s:update_generate_targets_cache_and_split(context) abort
   let l:root_compile_commands_path = s:resolve_root_compile_commands_path(
         \ l:build_directory,
         \ l:scan_directory,
-        \ '')
+        \ l:preset_value)
   let l:targets = s:available_targets(l:scan_directory, l:root_compile_commands_path)
   let l:cache_path = s:update_local_targets_cache(l:config_path, l:targets)
   call s:run_split({
@@ -2906,12 +3014,14 @@ function! s:update_generate_targets_cache_and_split(context) abort
         \ 'output_name': s:default_output_filename,
         \ 'dry_run': 0
         \ })
-  let l:config = s:read_json_object(l:config_path)
-  call s:maybe_reselect_configured_target_after_generate(
-        \ l:config_path,
-        \ l:config,
-        \ l:build_directory,
-        \ l:scan_directory)
+  if l:reselect_target
+    let l:config = s:read_json_object(l:config_path)
+    call s:maybe_reselect_configured_target_after_generate(
+          \ l:config_path,
+          \ l:config,
+          \ l:build_directory,
+          \ l:scan_directory)
+  endif
 
   if !empty(l:project_root)
     call s:write_info('Updated target cache in ' . s:relative_path(l:cache_path, l:project_root))
@@ -3518,6 +3628,22 @@ function! s:cmake_generate_terminal_running_name(preset_value) abort
   endif
 
   return join(l:name_parts, ' ')
+endfunction
+
+function! s:cmake_generate_terminal_running_name_for_presets(preset_values) abort
+  if type(a:preset_values) != v:t_list
+    return s:cmake_generate_terminal_running_name('')
+  endif
+
+  let l:preset_values = filter(copy(a:preset_values), '!empty(trim(s:to_string_or_empty(v:val)))')
+  if empty(l:preset_values)
+    return s:cmake_generate_terminal_running_name('')
+  endif
+  if len(l:preset_values) == 1
+    return s:cmake_generate_terminal_running_name(l:preset_values[0])
+  endif
+
+  return 'cmake generate --preset=all[' . len(l:preset_values) . ']'
 endfunction
 
 function! s:cmake_build_terminal_running_name(preset_value, target_value) abort

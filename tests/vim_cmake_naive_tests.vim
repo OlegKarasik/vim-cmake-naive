@@ -1877,6 +1877,105 @@ function! s:test_cmake_generate_uses_existing_config_values() abort
   endtry
 endfunction
 
+function! s:test_cmake_generate_runs_for_all_detected_presets() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': '', 'build': 'Release'})
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [
+          \   {'name': 'dev'},
+          \   {'name': 'release'}
+          \ ])
+
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-args-all-presets.txt')
+    let l:seed_compile_commands_path = s:path_join(l:fixture.root, 'cmake-generate-seed-all-presets.json')
+    call s:write_json(l:seed_compile_commands_path, s:fixture_entries())
+
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" >> ' . shellescape(l:args_path),
+          \ 'echo "---" >> ' . shellescape(l:args_path),
+          \ 'build_dir=""',
+          \ 'previous=""',
+          \ 'for argument in "$@"; do',
+          \ '  if [ "$previous" = "-B" ]; then',
+          \ '    build_dir="$argument"',
+          \ '  fi',
+          \ '  previous="$argument"',
+          \ 'done',
+          \ 'if [ -n "$build_dir" ]; then',
+          \ '  mkdir -p "$build_dir"',
+          \ '  cat ' . shellescape(l:seed_compile_commands_path) . ' > "$build_dir/compile_commands.json"',
+          \ 'fi',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#generate()
+    call assert_true(
+          \ s:wait_for_running_cmake_command_release(60000),
+          \ 'Expected generate command to finish for all detected presets.')
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_build_dir = s:path_join(l:expected_root, 'out/build-dir')
+    let l:expected_dev_build_dir = s:path_join(l:expected_build_dir, 'dev')
+    let l:expected_release_build_dir = s:path_join(l:expected_build_dir, 'release')
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    call assert_equal(
+          \ [
+          \   '-S',
+          \   l:expected_root,
+          \   '-B',
+          \   l:expected_dev_build_dir,
+          \   '--fresh',
+          \   '--preset',
+          \   'dev',
+          \   '---',
+          \   '-S',
+          \   l:expected_root,
+          \   '-B',
+          \   l:expected_release_build_dir,
+          \   '--fresh',
+          \   '--preset',
+          \   'release',
+          \   '---'
+          \ ],
+          \ s:read_non_empty_lines(l:args_path))
+    call assert_true(isdirectory(l:expected_dev_build_dir), 'Expected dev preset output directory to be created.')
+    call assert_true(isdirectory(l:expected_release_build_dir), 'Expected release preset output directory to be created.')
+
+    let l:cache_path = s:path_join(l:fixture.root, '.vim-cmake-naive-cache.json')
+    let l:dev_split_path = s:path_join(
+          \ s:path_join(s:path_join(l:fixture.root, 'out/build-dir/dev/CMakeFiles'), 'app.dir'),
+          \ 'compile_commands.json')
+    let l:release_split_path = s:path_join(
+          \ s:path_join(s:path_join(l:fixture.root, 'out/build-dir/release/lib/CMakeFiles'), 'mylib.dir'),
+          \ 'compile_commands.json')
+    call assert_true(s:wait_for_file(l:cache_path, 1000), 'Expected local cache file to be written.')
+    call assert_equal(['app', 'mylib'], get(s:read_json(l:cache_path), 'targets', []))
+    call assert_true(filereadable(l:dev_split_path), 'Expected dev preset split compile_commands.json to be written.')
+    call assert_true(filereadable(l:release_split_path), 'Expected release preset split compile_commands.json to be written.')
+  finally
+    let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
 function! s:test_cmake_generate_opens_horizontal_terminal_with_command_output() abort
   if !has('unix')
     return
@@ -7348,6 +7447,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_config_default_errors_when_no_cmakelists_found()
   call s:test_cmake_generate_creates_default_config_and_invokes_cmake()
   call s:test_cmake_generate_uses_existing_config_values()
+  call s:test_cmake_generate_runs_for_all_detected_presets()
   call s:test_cmake_generate_opens_horizontal_terminal_with_command_output()
   call s:test_cmake_generate_reuses_visible_output_window_when_possible()
   call s:test_cmake_generate_sets_running_terminal_name_on_subsequent_invocation()
