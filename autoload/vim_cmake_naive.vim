@@ -47,6 +47,8 @@ let s:running_terminal_progress_timer_id = -1
 let s:terminal_statusline_warning_highlight = 'WarningMsg'
 let s:running_terminal_progress_previous_statusline = v:null
 let s:cmake_generate_progress_line_prefix = '[vim-cmake-naive-generate-progress] '
+let s:running_generate_all_presets = []
+let s:running_generate_last_progress_title = ''
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
 let s:cmake_missing_project_root_error =
@@ -379,6 +381,10 @@ function! s:release_running_cmake_command_lock(command_name) abort
     call s:release_running_terminal_progress(l:command_name)
     let s:running_cmake_command_name = ''
     let s:running_cmake_command_lock_source = ''
+    if l:command_name ==# 'CMakeGenerate'
+      let s:running_generate_all_presets = []
+      let s:running_generate_last_progress_title = ''
+    endif
   endif
   let s:keep_running_cmake_command_lock = 0
 endfunction
@@ -2891,6 +2897,9 @@ function! s:run_cmake_config_default() abort
 endfunction
 
 function! s:run_generate() abort
+  let s:running_generate_all_presets = []
+  let s:running_generate_last_progress_title = ''
+
   let l:working_directory = s:normalize_full_path(getcwd())
   let l:project_root = s:resolve_cmake_project_root_with_file_fallback(l:working_directory)
   let l:project_start_directory = s:project_search_start_directory(l:working_directory, l:project_root)
@@ -2915,6 +2924,10 @@ function! s:run_generate() abort
   let l:detected_presets = has('unix') ? s:available_generate_presets(l:project_root) : []
   let l:ordered_presets = s:ordered_generate_presets(l:detected_presets, l:preset_value)
   if !empty(l:ordered_presets)
+    if len(l:ordered_presets) > 1
+      let s:running_generate_all_presets = copy(l:ordered_presets)
+    endif
+
     let l:reselect_preset = !empty(l:preset_value) && index(l:ordered_presets, l:preset_value) >= 0
           \ ? l:preset_value
           \ : l:ordered_presets[len(l:ordered_presets) - 1]
@@ -4257,6 +4270,11 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
   let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
   let l:captured_output_lines = s:take_terminal_output_capture_lines(l:output_capture_key)
+  let l:completion_terminal_title = s:terminal_completion_title(
+        \ l:command_name,
+        \ l:terminal_name,
+        \ l:captured_output_lines,
+        \ l:exit_code == 0)
   call s:capture_build_terminal_for_tests(-1, l:terminal_buffer_number)
   let l:OnSuccessCallback = s:take_build_terminal_success_callback(l:terminal_buffer_number, 1)
   if l:exit_code == 0
@@ -4264,7 +4282,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
       call s:write_terminal_command_success(
             \ l:command_name,
             \ l:duration_seconds,
-            \ l:terminal_name)
+            \ l:completion_terminal_title)
     endif
   else
     if l:populate_quickfix_on_failure
@@ -4277,7 +4295,7 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
           \ l:command_name,
           \ l:exit_code,
           \ l:duration_seconds,
-          \ l:terminal_name)
+          \ l:completion_terminal_title)
   endif
 endfunction
 
@@ -4459,7 +4477,41 @@ function! s:update_running_terminal_progress_from_output(command_name, payload) 
     return
   endif
 
+  let s:running_generate_last_progress_title = l:terminal_title
   call s:set_running_terminal_progress_title(l:command_name, l:terminal_title)
+endfunction
+
+function! s:cmake_generate_completion_terminal_title(is_success, explicit_terminal_title) abort
+  let l:explicit_terminal_title = trim(s:to_string_or_empty(a:explicit_terminal_title))
+  let l:last_title = trim(s:to_string_or_empty(s:running_generate_last_progress_title))
+  if !s:as_condition_bool(a:is_success)
+    return empty(l:last_title) ? l:explicit_terminal_title : l:last_title
+  endif
+
+  if len(s:running_generate_all_presets) > 1
+    let l:preset_names = map(copy(s:running_generate_all_presets), 'trim(s:to_string_or_empty(v:val))')
+    return 'cmake generate '
+          \ . join(l:preset_names, ', ')
+          \ . ' ('
+          \ . len(l:preset_names)
+          \ . ' of '
+          \ . len(l:preset_names)
+          \ . ')'
+  endif
+
+  return empty(l:last_title) ? l:explicit_terminal_title : l:last_title
+endfunction
+
+function! s:terminal_completion_title(command_name, explicit_terminal_title, captured_output_lines, is_success) abort
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  let l:explicit_terminal_title = trim(s:to_string_or_empty(a:explicit_terminal_title))
+  if l:command_name !=# 'CMakeGenerate'
+    return l:explicit_terminal_title
+  endif
+
+  return s:cmake_generate_completion_terminal_title(
+        \ a:is_success,
+        \ l:explicit_terminal_title)
 endfunction
 
 function! s:on_terminal_command_stdout(capture_key, command_name, channel, payload) abort
@@ -4491,6 +4543,11 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
     let l:captured_output_lines = s:take_terminal_output_capture_lines(a:output_capture_key)
+    let l:completion_terminal_title = s:terminal_completion_title(
+          \ a:command_name,
+          \ a:terminal_name,
+          \ l:captured_output_lines,
+          \ l:exit_code == 0)
     let l:terminal_buffer_number = s:take_hidden_terminal_buffer_for_job(a:job)
     if l:terminal_buffer_number <= 0
       let l:terminal_buffer_number = s:plugin_terminal_buffer_number_by_title(a:terminal_name)
@@ -4505,7 +4562,7 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
         call s:write_terminal_command_success(
               \ a:command_name,
               \ l:duration_seconds,
-              \ a:terminal_name)
+              \ l:completion_terminal_title)
       endif
     else
       if s:as_condition_bool(a:populate_quickfix_on_failure)
@@ -4518,7 +4575,7 @@ function! s:on_hidden_terminal_command_exit(populate_quickfix_on_failure, comman
             \ a:command_name,
             \ l:exit_code,
             \ l:duration_seconds,
-            \ a:terminal_name)
+            \ l:completion_terminal_title)
     endif
   finally
     call s:release_running_cmake_command_lock(a:command_name)
@@ -4929,6 +4986,11 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
     let l:exit_code = s:wait_for_terminal_command_and_read_exit_code(l:terminal_buffer_number)
     let l:duration_seconds = s:elapsed_seconds_since(l:started_at)
     let l:captured_output_lines = s:take_terminal_output_capture_lines(l:output_capture_key)
+    let l:completion_terminal_title = s:terminal_completion_title(
+          \ l:command_name,
+          \ l:terminal_name,
+          \ l:captured_output_lines,
+          \ l:exit_code == 0)
     call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
     let l:OnSuccessCallback = s:take_build_terminal_success_callback(a:window_id)
     if l:exit_code == 0
@@ -4936,7 +4998,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
         call s:write_terminal_command_success(
               \ l:command_name,
               \ l:duration_seconds,
-              \ l:terminal_name)
+              \ l:completion_terminal_title)
       endif
     else
       if l:populate_quickfix_on_failure
@@ -4949,7 +5011,7 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
             \ l:command_name,
             \ l:exit_code,
             \ l:duration_seconds,
-            \ l:terminal_name)
+            \ l:completion_terminal_title)
     endif
   endif
 endfunction
@@ -4959,6 +5021,11 @@ function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failu
     let l:exit_code = s:terminal_job_exit_code(a:job, a:status)
     let l:duration_seconds = s:elapsed_seconds_since(a:started_at)
     let l:captured_output_lines = s:take_terminal_output_capture_lines(a:output_capture_key)
+    let l:completion_terminal_title = s:terminal_completion_title(
+          \ a:command_name,
+          \ a:terminal_name,
+          \ l:captured_output_lines,
+          \ l:exit_code == 0)
     let l:terminal_buffer_number = s:terminal_buffer_number_for_window(a:window_id)
     if l:terminal_buffer_number > 0
       call s:capture_build_terminal_for_tests(a:window_id, l:terminal_buffer_number)
@@ -4970,7 +5037,7 @@ function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failu
         call s:write_terminal_command_success(
               \ a:command_name,
               \ l:duration_seconds,
-              \ a:terminal_name)
+              \ l:completion_terminal_title)
       endif
     else
       if s:as_condition_bool(a:populate_quickfix_on_failure)
@@ -4983,7 +5050,7 @@ function! s:on_build_terminal_command_exit(window_id, populate_quickfix_on_failu
             \ a:command_name,
             \ l:exit_code,
             \ l:duration_seconds,
-            \ a:terminal_name)
+            \ l:completion_terminal_title)
     endif
   finally
     call s:release_running_cmake_command_lock(a:command_name)
@@ -5064,13 +5131,22 @@ function! s:terminal_statusline_title(command_name, ...) abort
   return s:terminal_command_display_name(a:command_name)
 endfunction
 
-function! s:terminal_result_message(terminal_title, elapsed_seconds, is_success) abort
+function! s:terminal_result_tag(command_name, is_success) abort
+  if s:as_condition_bool(a:is_success)
+    return '[Success]'
+  endif
+
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  return l:command_name ==# 'CMakeGenerate' ? '[Failed]' : '[Error]'
+endfunction
+
+function! s:terminal_result_message(command_name, terminal_title, elapsed_seconds, is_success) abort
   let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
   if empty(l:terminal_title)
     return ''
   endif
 
-  let l:result_text = a:is_success ? '[Success]' : '[Error]'
+  let l:result_text = s:terminal_result_tag(a:command_name, a:is_success)
   return l:terminal_title
         \ . ' '
         \ . s:format_elapsed_runtime(a:elapsed_seconds)
@@ -5080,13 +5156,13 @@ endfunction
 
 function! s:write_terminal_command_success(command_name, elapsed_seconds, ...) abort
   let l:terminal_title = s:terminal_statusline_title(a:command_name, a:0 > 0 ? a:1 : '')
-  call s:write_success(s:terminal_result_message(l:terminal_title, a:elapsed_seconds, 1) . '.')
+  call s:write_success(s:terminal_result_message(a:command_name, l:terminal_title, a:elapsed_seconds, 1) . '.')
 endfunction
 
 function! s:write_terminal_command_failure(command_name, exit_code, elapsed_seconds, ...) abort
   let l:terminal_title = s:terminal_statusline_title(a:command_name, a:0 > 0 ? a:1 : '')
   call s:write_error(
-        \ s:terminal_result_message(l:terminal_title, a:elapsed_seconds, 0)
+        \ s:terminal_result_message(a:command_name, l:terminal_title, a:elapsed_seconds, 0)
         \ . ' (exit code '
         \ . a:exit_code
         \ . ').')

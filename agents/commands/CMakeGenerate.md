@@ -30,7 +30,7 @@
    2. All-presets example:
       `cmake generate release (2 of 2) [00:00:05]`.
 10. On completion, restores global statusline to its pre-command value and writes
-   Vim message with command label, runtime, and `[Success]` or `[Error]`
+   Vim message with command label, runtime, and `[Success]` or `[Failed]`
    suffix.
 11. On successful completion:
     1. reads root `compile_commands.json` from scan directory

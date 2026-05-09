@@ -1946,6 +1946,13 @@ function! s:test_cmake_generate_runs_for_all_detected_presets() abort
     call assert_true(
           \ s:wait_for_statusline_value(l:statusline_before, 1000),
           \ 'Expected generate statusline to be restored after completion.')
+    let l:messages = execute('messages')
+    let l:expected_success_title = 'cmake generate dev, release (2 of 2)'
+    call assert_match(
+          \ '\[vim-cmake-naive\] '
+          \ . escape(l:expected_success_title, '\.^$*[]')
+          \ . ' \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] \[Success\]\.',
+          \ l:messages)
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'out/build-dir')
@@ -1988,6 +1995,86 @@ function! s:test_cmake_generate_runs_for_all_detected_presets() abort
     call assert_true(filereadable(l:release_split_path), 'Expected release preset split compile_commands.json to be written.')
   finally
     let &g:statusline = l:initial_statusline
+    let $PATH = l:initial_path
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_generate_reports_failed_preset_for_all_detected_presets() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+
+  try
+    let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
+    call s:write_json(l:config_path, {'output': 'out/build-dir', 'preset': '', 'build': 'Release'})
+    call s:write_cmake_presets(
+          \ s:path_join(l:fixture.root, 'CMakePresets.json'),
+          \ [
+          \   {'name': 'dev'},
+          \   {'name': 'release'}
+          \ ])
+
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-generate-args-all-presets-failure.txt')
+    let l:bin_dir = s:path_join(l:fixture.root, 'fake-bin')
+    call mkdir(l:bin_dir, 'p')
+    let l:script_path = s:path_join(l:bin_dir, 'cmake')
+    call writefile([
+          \ '#!/bin/sh',
+          \ 'printf "%s\n" "$@" >> ' . shellescape(l:args_path),
+          \ 'echo "---" >> ' . shellescape(l:args_path),
+          \ 'preset=""',
+          \ 'previous=""',
+          \ 'for argument in "$@"; do',
+          \ '  if [ "$previous" = "--preset" ]; then',
+          \ '    preset="$argument"',
+          \ '  fi',
+          \ '  previous="$argument"',
+          \ 'done',
+          \ 'if [ "$preset" = "dev" ]; then',
+          \ '  exit 7',
+          \ 'fi',
+          \ 'exit 0'
+          \ ], l:script_path, 'b')
+    call system('chmod +x ' . shellescape(l:script_path))
+    let $PATH = l:bin_dir . ':' . l:initial_path
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    call vim_cmake_naive#generate()
+    call assert_true(
+          \ s:wait_for_running_cmake_command_release(60000),
+          \ 'Expected generate command to stop after preset failure.')
+
+    let l:expected_root = s:normalized_path(l:fixture.root)
+    let l:expected_build_dir = s:path_join(l:expected_root, 'out/build-dir')
+    let l:expected_dev_build_dir = s:path_join(l:expected_build_dir, 'dev')
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    call assert_equal(
+          \ [
+          \   '-S',
+          \   l:expected_root,
+          \   '-B',
+          \   l:expected_dev_build_dir,
+          \   '--fresh',
+          \   '--preset',
+          \   'dev',
+          \   '---'
+          \ ],
+          \ s:read_non_empty_lines(l:args_path))
+
+    let l:messages = execute('messages')
+    let l:expected_failure_title = 'cmake generate dev (1 of 2)'
+    call assert_match(
+          \ '\[vim-cmake-naive\] '
+          \ . escape(l:expected_failure_title, '\.^$*[]')
+          \ . ' \[[0-9]\{2}:[0-9]\{2}:[0-9]\{2}\] \[Failed\] (exit code 7)\.',
+          \ l:messages)
+  finally
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')
