@@ -24,9 +24,11 @@
    line prefixed with `[Command]:`.
 8. If a plugin CMake preview window is already visible, it reuses that preview
    window and streams generate output there.
-9. While running, updates global statusline immediately with warning highlight
-   and command label plus elapsed runtime
-   (for example `cmake generate --preset=<preset> [00:00:05]`).
+9. While running, updates global statusline immediately with warning highlight,
+   command label, and elapsed runtime.
+   1. Single-preset example: `cmake generate --preset=<preset> [00:00:05]`.
+   2. All-presets example:
+      `cmake generate release (2 of 2) [00:00:05]`.
 10. On completion, restores global statusline to its pre-command value and writes
    Vim message with command label, runtime, and `[Success]` or `[Error]`
    suffix.

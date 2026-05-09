@@ -1885,6 +1885,8 @@ function! s:test_cmake_generate_runs_for_all_detected_presets() abort
   let l:fixture = s:create_cmake_project_fixture()
   let l:initial_cwd = getcwd()
   let l:initial_path = $PATH
+  let l:initial_statusline = &g:statusline
+  let l:statusline_before = s:unique_id('statusline-generate-all-before-')
 
   try
     let l:config_path = s:path_join(l:fixture.root, '.vim-cmake-naive-config.json')
@@ -1919,16 +1921,31 @@ function! s:test_cmake_generate_runs_for_all_detected_presets() abort
           \ '  mkdir -p "$build_dir"',
           \ '  cat ' . shellescape(l:seed_compile_commands_path) . ' > "$build_dir/compile_commands.json"',
           \ 'fi',
+          \ 'sleep 1',
           \ 'exit 0'
           \ ], l:script_path, 'b')
     call system('chmod +x ' . shellescape(l:script_path))
     let $PATH = l:bin_dir . ':' . l:initial_path
 
     execute 'cd ' . fnameescape(l:fixture.root)
+    let &g:statusline = l:statusline_before
     call vim_cmake_naive#generate()
+    let l:running_buffer_name = 'cmake generate dev (1 of 2)'
+    let l:first_progress_title = l:running_buffer_name
+    let l:running_buffer_number = s:wait_for_plugin_terminal_buffer_name(l:running_buffer_name, 1000)
+    call assert_true(l:running_buffer_number > 0, 'Expected running generate terminal buffer for all presets.')
+    call assert_true(
+          \ s:wait_for_running_progress_message(l:first_progress_title, 1000),
+          \ 'Expected running generate statusline to show first preset progress.')
+    call assert_true(
+          \ s:wait_for_running_progress_message('cmake generate release (2 of 2)', 3000),
+          \ 'Expected running generate statusline to show next preset progress.')
     call assert_true(
           \ s:wait_for_running_cmake_command_release(60000),
           \ 'Expected generate command to finish for all detected presets.')
+    call assert_true(
+          \ s:wait_for_statusline_value(l:statusline_before, 1000),
+          \ 'Expected generate statusline to be restored after completion.')
 
     let l:expected_root = s:normalized_path(l:fixture.root)
     let l:expected_build_dir = s:path_join(l:expected_root, 'out/build-dir')
@@ -1970,6 +1987,7 @@ function! s:test_cmake_generate_runs_for_all_detected_presets() abort
     call assert_true(filereadable(l:dev_split_path), 'Expected dev preset split compile_commands.json to be written.')
     call assert_true(filereadable(l:release_split_path), 'Expected release preset split compile_commands.json to be written.')
   finally
+    let &g:statusline = l:initial_statusline
     let $PATH = l:initial_path
     execute 'cd ' . fnameescape(l:initial_cwd)
     call delete(l:fixture.root, 'rf')

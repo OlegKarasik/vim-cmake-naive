@@ -46,6 +46,7 @@ let s:running_terminal_progress_started_at = []
 let s:running_terminal_progress_timer_id = -1
 let s:terminal_statusline_warning_highlight = 'WarningMsg'
 let s:running_terminal_progress_previous_statusline = v:null
+let s:cmake_generate_progress_line_prefix = '[vim-cmake-naive-generate-progress] '
 let s:cmake_missing_local_config_error =
       \ s:cmake_config_filename . ' not found in current directory or any parent directory.'
 let s:cmake_missing_project_root_error =
@@ -283,6 +284,25 @@ function! s:hold_running_terminal_progress(command_name, terminal_title) abort
       let s:running_terminal_progress_timer_id = l:timer_id
     endif
   endif
+endfunction
+
+function! s:set_running_terminal_progress_title(command_name, terminal_title) abort
+  if !s:running_terminal_progress_active
+    return
+  endif
+
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  if !empty(l:command_name) && s:running_terminal_progress_command_name !=# l:command_name
+    return
+  endif
+
+  let l:terminal_title = trim(s:to_string_or_empty(a:terminal_title))
+  if empty(l:terminal_title) || s:running_terminal_progress_terminal_title ==# l:terminal_title
+    return
+  endif
+
+  let s:running_terminal_progress_terminal_title = l:terminal_title
+  call s:write_running_terminal_progress()
 endfunction
 
 function! s:release_running_terminal_progress(command_name) abort
@@ -2837,10 +2857,15 @@ function! s:cmake_generate_all_presets_argv(project_root, build_directory, prese
     throw 'Generating all presets is currently supported only on Unix-like systems.'
   endif
 
+  let l:progress_line_format = shellescape(
+        \ s:cmake_generate_progress_line_prefix
+        \ . 'cmake generate %s (%s of %s)\n')
   let l:argv = [
         \ 'sh',
         \ '-c',
-        \ 'project_root="$1"; shift; build_directory="$1"; shift; for preset in "$@"; do cmake -S "$project_root" -B "$build_directory/$preset" --fresh --preset "$preset" || exit $?; done',
+        \ 'project_root="$1"; shift; build_directory="$1"; shift; preset_count="$#"; preset_index=0; for preset in "$@"; do preset_index=$((preset_index + 1)); printf '
+        \ . l:progress_line_format
+        \ . ' "$preset" "$preset_index" "$preset_count"; cmake -S "$project_root" -B "$build_directory/$preset" --fresh --preset "$preset" || exit $?; done',
         \ 'vim-cmake-naive-generate',
         \ a:project_root,
         \ a:build_directory
@@ -3643,7 +3668,7 @@ function! s:cmake_generate_terminal_running_name_for_presets(preset_values) abor
     return s:cmake_generate_terminal_running_name(l:preset_values[0])
   endif
 
-  return 'cmake generate --preset=all[' . len(l:preset_values) . ']'
+  return 'cmake generate ' . l:preset_values[0] . ' (1 of ' . len(l:preset_values) . ')'
 endfunction
 
 function! s:cmake_build_terminal_running_name(preset_value, target_value) abort
@@ -4176,8 +4201,12 @@ function! s:start_terminal_command_in_hidden_buffer(argv, options) abort
   call s:close_build_terminal_hidden_buffers()
 
   let l:term_start_options = {'hidden': 1}
-  let l:term_start_options.out_cb = function('s:on_terminal_command_stdout', [l:output_capture_key])
-  let l:term_start_options.err_cb = function('s:on_terminal_command_stderr', [l:output_capture_key])
+  let l:term_start_options.out_cb = function(
+        \ 's:on_terminal_command_stdout',
+        \ [l:output_capture_key, l:command_name])
+  let l:term_start_options.err_cb = function(
+        \ 's:on_terminal_command_stderr',
+        \ [l:output_capture_key, l:command_name])
   let l:known_terminal_buffers = s:terminal_buffer_numbers()
   if !empty(l:working_directory)
     let l:term_start_options.cwd = l:working_directory
@@ -4387,11 +4416,59 @@ function! s:append_terminal_output_capture_lines(capture_key, payload) abort
   endfor
 endfunction
 
-function! s:on_terminal_command_stdout(capture_key, channel, payload) abort
+function! s:extract_generate_progress_title_from_terminal_output(payload) abort
+  if type(a:payload) == v:t_list
+    let l:title = ''
+    for l:item in a:payload
+      let l:item_title = s:extract_generate_progress_title_from_terminal_output(l:item)
+      if !empty(l:item_title)
+        let l:title = l:item_title
+      endif
+    endfor
+    return l:title
+  endif
+
+  let l:text = substitute(s:to_string_or_empty(a:payload), '\r', '', 'g')
+  if empty(l:text)
+    return ''
+  endif
+
+  let l:title = ''
+  for l:line in split(l:text, '\n', 1)
+    if stridx(l:line, s:cmake_generate_progress_line_prefix) != 0
+      continue
+    endif
+
+    let l:candidate_title = trim(strpart(l:line, strlen(s:cmake_generate_progress_line_prefix)))
+    if !empty(l:candidate_title)
+      let l:title = l:candidate_title
+    endif
+  endfor
+
+  return l:title
+endfunction
+
+function! s:update_running_terminal_progress_from_output(command_name, payload) abort
+  let l:command_name = trim(s:to_string_or_empty(a:command_name))
+  if l:command_name !=# 'CMakeGenerate'
+    return
+  endif
+
+  let l:terminal_title = s:extract_generate_progress_title_from_terminal_output(a:payload)
+  if empty(l:terminal_title)
+    return
+  endif
+
+  call s:set_running_terminal_progress_title(l:command_name, l:terminal_title)
+endfunction
+
+function! s:on_terminal_command_stdout(capture_key, command_name, channel, payload) abort
+  call s:update_running_terminal_progress_from_output(a:command_name, a:payload)
   call s:append_terminal_output_capture_lines(a:capture_key, a:payload)
 endfunction
 
-function! s:on_terminal_command_stderr(capture_key, channel, payload) abort
+function! s:on_terminal_command_stderr(capture_key, command_name, channel, payload) abort
+  call s:update_running_terminal_progress_from_output(a:command_name, a:payload)
   call s:append_terminal_output_capture_lines(a:capture_key, a:payload)
 endfunction
 
@@ -4800,8 +4877,12 @@ function! s:start_terminal_command_in_current_buffer(argv, window_id, ...) abort
   endif
 
   let l:term_options = {'curwin': 1}
-  let l:term_options.out_cb = function('s:on_terminal_command_stdout', [l:output_capture_key])
-  let l:term_options.err_cb = function('s:on_terminal_command_stderr', [l:output_capture_key])
+  let l:term_options.out_cb = function(
+        \ 's:on_terminal_command_stdout',
+        \ [l:output_capture_key, l:command_name])
+  let l:term_options.err_cb = function(
+        \ 's:on_terminal_command_stderr',
+        \ [l:output_capture_key, l:command_name])
   call s:disable_swapfile_for_current_buffer()
   call s:set_build_terminal_success_callback(a:window_id, l:OnSuccessCallback)
   if !empty(l:working_directory)
