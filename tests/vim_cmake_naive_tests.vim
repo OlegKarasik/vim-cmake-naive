@@ -100,6 +100,21 @@ function! s:create_fake_cmake_script_with_build_error(root, args_output_path, ex
   return l:bin_dir
 endfunction
 
+function! s:create_fake_cmake_script_with_build_error_and_note(root, args_output_path, exit_code) abort
+  let l:bin_dir = s:path_join(a:root, 'fake-bin')
+  call mkdir(l:bin_dir, 'p')
+  let l:script_path = s:path_join(l:bin_dir, 'cmake')
+  call writefile([
+        \ '#!/bin/sh',
+        \ 'printf "%s\n" "$@" > ' . shellescape(a:args_output_path),
+        \ 'echo "src/main.cpp:3:7: error: build backend failure" >&2',
+        \ 'echo "src/main.cpp:2:3: note: build backend context" >&2',
+        \ 'exit ' . string(a:exit_code)
+        \ ], l:script_path, 'b')
+  call system('chmod +x ' . shellescape(l:script_path))
+  return l:bin_dir
+endfunction
+
 function! s:create_fake_cmake_script_with_long_build_output_error(root, args_output_path, output_line_count, exit_code) abort
   let l:bin_dir = s:path_join(a:root, 'fake-bin')
   call mkdir(l:bin_dir, 'p')
@@ -3139,6 +3154,80 @@ function! s:test_cmake_build_populates_quickfix_on_failure() abort
     call assert_equal(3, get(l:quickfix[0], 'lnum', 0))
     call assert_equal(7, get(l:quickfix[0], 'col', 0))
     call assert_true(stridx(get(l:quickfix[0], 'text', ''), 'build backend failure') >= 0)
+  finally
+    let $PATH = l:initial_path
+    if l:initial_capture_terminal is v:null
+      unlet! g:vim_cmake_naive_test_capture_build_terminal
+    else
+      let g:vim_cmake_naive_test_capture_build_terminal = l:initial_capture_terminal
+    endif
+    if l:initial_last_terminal is v:null
+      unlet! g:vim_cmake_naive_test_last_build_terminal
+    else
+      let g:vim_cmake_naive_test_last_build_terminal = l:initial_last_terminal
+    endif
+    if l:initial_make_errorformat is v:null
+      unlet! g:vim_cmake_naive_make_errorformat
+    else
+      let g:vim_cmake_naive_make_errorformat = l:initial_make_errorformat
+    endif
+    silent! cclose
+    call setqflist([])
+    call vim_cmake_naive#close()
+    execute 'silent keepalt enew'
+    execute 'cd ' . fnameescape(l:initial_cwd)
+    call delete(l:fixture.root, 'rf')
+  endtry
+endfunction
+
+function! s:test_cmake_build_quickfix_excludes_note_diagnostics() abort
+  if !has('unix')
+    return
+  endif
+
+  let l:fixture = s:create_cmake_project_fixture()
+  let l:initial_cwd = getcwd()
+  let l:initial_path = $PATH
+  let l:initial_capture_terminal = get(g:, 'vim_cmake_naive_test_capture_build_terminal', v:null)
+  let l:initial_last_terminal = get(g:, 'vim_cmake_naive_test_last_build_terminal', v:null)
+  let l:initial_make_errorformat = get(g:, 'vim_cmake_naive_make_errorformat', v:null)
+
+  try
+    let l:args_path = s:path_join(l:fixture.root, 'cmake-build-args-quickfix-notes.txt')
+    let l:bin_dir = s:create_fake_cmake_script_with_build_error_and_note(l:fixture.root, l:args_path, 2)
+    let $PATH = l:bin_dir . ':' . l:initial_path
+    let g:vim_cmake_naive_test_capture_build_terminal = 1
+    let g:vim_cmake_naive_make_errorformat = '%f:%l:%c: %m'
+    call mkdir(s:path_join(l:fixture.root, 'src'), 'p')
+    call writefile(['int main() { return 0; }'], s:path_join(l:fixture.root, 'src/main.cpp'), 'b')
+    call setqflist([])
+    silent! cclose
+
+    execute 'cd ' . fnameescape(l:fixture.root)
+    unlet! g:vim_cmake_naive_test_last_build_terminal
+    call vim_cmake_naive#build()
+
+    let l:terminal = s:wait_for_captured_build_terminal_output('build backend context', 1000)
+    call assert_equal(1, get(l:terminal, 'is_terminal', 0))
+
+    call assert_true(s:wait_for_file(l:args_path, 1000), 'Expected fake cmake args file to be created.')
+    let l:quickfix = getqflist()
+    call assert_true(len(l:quickfix) > 0, 'Expected quickfix list to include build diagnostics after failure.')
+    call assert_equal(
+          \ 0,
+          \ len(filter(copy(l:quickfix), '!get(v:val, "valid", 0)')),
+          \ 'Expected quickfix list to exclude non-diagnostic build output lines.')
+    call assert_equal(
+          \ 0,
+          \ len(filter(copy(l:quickfix), 'tolower(trim(get(v:val, "type", ""))) ==# "n"')),
+          \ 'Expected quickfix list to exclude note diagnostics by quickfix type.')
+    call assert_equal(
+          \ 0,
+          \ len(filter(copy(l:quickfix), 'get(v:val, "text", "") =~? ''^note\>\%(:\|\s\)''')),
+          \ 'Expected quickfix list to exclude note diagnostics by message text.')
+    call assert_true(
+          \ !empty(filter(copy(l:quickfix), 'stridx(get(v:val, "text", ""), "build backend failure") >= 0')),
+          \ 'Expected quickfix list to keep the error diagnostic entry.')
   finally
     let $PATH = l:initial_path
     if l:initial_capture_terminal is v:null
@@ -7573,6 +7662,7 @@ function! VimCMakeNaiveTestRunAll() abort
   call s:test_cmake_build_opens_horizontal_terminal_with_stdout_and_stderr_output()
   call s:test_cmake_build_sets_failure_terminal_name_with_exit_code()
   call s:test_cmake_build_populates_quickfix_on_failure()
+  call s:test_cmake_build_quickfix_excludes_note_diagnostics()
   call s:test_cmake_build_populates_quickfix_for_error_after_many_output_lines()
   call s:test_cmake_build_clears_quickfix_before_execution()
   call s:test_cmake_build_failure_opens_quickfix_when_enabled()

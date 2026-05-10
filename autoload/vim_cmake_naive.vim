@@ -3250,6 +3250,20 @@ function! s:clear_quickfix_entries() abort
   call setqflist([])
 endfunction
 
+function! s:is_note_quickfix_entry(entry) abort
+  if type(a:entry) != v:t_dict
+    return 0
+  endif
+
+  let l:type_value = tolower(trim(s:to_string_or_empty(get(a:entry, 'type', ''))))
+  if l:type_value ==# 'n'
+    return 1
+  endif
+
+  let l:text_value = trim(s:to_string_or_empty(get(a:entry, 'text', '')))
+  return l:text_value =~? '^note\>\%(:\|\s\)'
+endfunction
+
 function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number, ...) abort
   let l:errorformat = trim(s:active_quickfix_errorformat())
   if empty(l:errorformat)
@@ -3274,7 +3288,9 @@ function! s:populate_cmake_build_quickfix_from_terminal_output(buffer_number, ..
   endtry
 
   let l:parsed_quickfix_entries = getqflist()
-  let l:quickfix_entries = filter(copy(l:parsed_quickfix_entries), 'get(v:val, ''valid'', 0)')
+  let l:quickfix_entries = filter(
+        \ copy(l:parsed_quickfix_entries),
+        \ 'get(v:val, ''valid'', 0) && !s:is_note_quickfix_entry(v:val)')
   if len(l:quickfix_entries) != len(l:parsed_quickfix_entries)
     try
       call setqflist(l:quickfix_entries, 'r')

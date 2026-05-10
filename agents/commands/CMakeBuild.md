@@ -33,5 +33,6 @@
 12. On failure, parses terminal output into quickfix entries:
    1. uses `g:vim_cmake_naive_make_errorformat` when set
    2. otherwise uses Vim `errorformat`
-   3. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
+   3. excludes diagnostics classified as `note`
+   4. opens quickfix on failure when `g:vim_cmake_naive_open_quickfix_on_error` is
       enabled and entries were parsed
