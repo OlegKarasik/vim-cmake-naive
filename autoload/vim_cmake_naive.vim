@@ -999,6 +999,7 @@ function! s:run_switch_preset() abort
     endif
     return
   endif
+  call s:require_popup_menu_or_test_fallback('CMakeSwitchPreset')
 
   let l:selected_preset = s:select_item_from_menu(
         \ l:selection_prompt,
@@ -1030,6 +1031,7 @@ function! s:run_switch_build() abort
     endif
     return
   endif
+  call s:require_popup_menu_or_test_fallback('CMakeSwitchBuild')
 
   let l:selected_build = s:select_item_from_menu(
         \ l:selection_prompt,
@@ -1053,6 +1055,8 @@ function! s:run_menu_with_specs(command_specs, ...) abort
   if s:should_use_popup_menu_for_preset_selection()
     return s:show_menu_popup(s:cmake_menu_prompt, l:commands, l:popup_lock_command_name)
   endif
+  let l:selection_command_name = empty(l:popup_lock_command_name) ? 'CMakeMenu' : l:popup_lock_command_name
+  call s:require_popup_menu_or_test_fallback(l:selection_command_name)
 
   let l:selected_command = s:select_item_from_list(s:cmake_menu_prompt, l:commands)
   if empty(l:selected_command)
@@ -1308,6 +1312,20 @@ function! s:should_use_popup_menu_for_preset_selection() abort
   return exists('*popup_menu')
         \ && !exists('g:vim_cmake_naive_test_menu_response')
         \ && !exists('g:vim_cmake_naive_test_inputlist_response')
+endfunction
+
+function! s:is_selection_fallback_test_mode() abort
+  return exists('g:vim_cmake_naive_test_menu_response')
+        \ || exists('g:vim_cmake_naive_test_inputlist_response')
+endfunction
+
+function! s:require_popup_menu_or_test_fallback(command_name) abort
+  if s:should_use_popup_menu_for_preset_selection()
+        \ || s:is_selection_fallback_test_mode()
+    return
+  endif
+
+  throw a:command_name . ' requires popup support (popup_menu).'
 endfunction
 
 function! s:show_switch_preset_popup(prompt, items, current_preset) abort
@@ -1842,6 +1860,7 @@ function! s:run_switch_target() abort
     endif
     return
   endif
+  call s:require_popup_menu_or_test_fallback('CMakeSwitchTarget')
 
   let l:selected_target = s:select_item_from_list(
         \ l:selection_prompt,
@@ -5152,8 +5171,7 @@ function! s:terminal_result_tag(command_name, is_success) abort
     return '[Success]'
   endif
 
-  let l:command_name = trim(s:to_string_or_empty(a:command_name))
-  return l:command_name ==# 'CMakeGenerate' ? '[Failed]' : '[Error]'
+  return '[Error]'
 endfunction
 
 function! s:terminal_result_message(command_name, terminal_title, elapsed_seconds, is_success) abort

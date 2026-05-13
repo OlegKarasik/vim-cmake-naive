@@ -23,7 +23,8 @@
    15. `CMakeMenu`
    16. `CMakeMenuFull`
    17. `CMakeConfigSetOutput`
-2. Uses Command Menu popup when popup support exists; otherwise list/menu fallback.
+2. Requires Command Menu popup support (`popup_menu()`); if popup support is
+   unavailable, command reports an error and stops.
 3. Only commands that currently exist in Vim are shown.
 4. For commands requiring args (`CMakeConfigSetOutput`), prompts:
    `Arguments for <Command>: `.

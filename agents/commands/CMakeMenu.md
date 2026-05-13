@@ -11,6 +11,6 @@
    3. `CMakeTest`
    4. `CMakeSwitchTarget`
    5. `CMakeSwitchPreset`
-2. Uses Command Menu popup when popup support exists; otherwise list/menu fallback.
+2. Requires Command Menu popup support (`popup_menu()`); if popup support is
+   unavailable, command reports an error and stops.
 3. Runs selected command with `silent`.
-

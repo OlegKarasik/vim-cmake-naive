@@ -12,7 +12,8 @@
 4. Resolves Local Configuration.
 5. Resolves Build Directory and Scan Directory from config.
 6. Prepends synthetic option `(all)` to cached targets.
-7. Shows Target Selection popup when popup support exists; otherwise inputlist fallback.
+7. Requires Target Selection popup support (`popup_menu()`); if popup support is
+   unavailable, command reports an error and stops.
 8. On selection:
    1. `(all)`:
       1. copies root `<scan-directory>/compile_commands.json` to

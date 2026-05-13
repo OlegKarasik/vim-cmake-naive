@@ -15,8 +15,8 @@
       `inList`, `notInList`, `matches`, `notMatches`, `anyOf`, `allOf`, `not`)
    3. resolves inheritance and rejects cycles/missing parents
 5. Prepends synthetic option `(none)`.
-6. Shows Preset Selection popup when popup support exists; otherwise uses
-   menu/inputlist fallback.
+6. Requires Preset Selection popup support (`popup_menu()`); if popup support is
+   unavailable, command reports an error and stops.
 7. On selection:
    1. `(none)` removes `preset`
    2. any preset name sets `preset` and removes `build`
