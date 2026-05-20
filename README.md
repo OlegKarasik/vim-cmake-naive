@@ -1,7 +1,7 @@
 # vim-cmake-naive
 
 > [!WARNING]
-> All code in the repository is written by AI
+> The code in this repository is written completely by AI. No human review applied.
 
 `vim-cmake-naive` is a Vim plugin for CMake workflows around `compile_commands.json` with async generate/build/test/run commands, popup helpers, and local project config.
 
